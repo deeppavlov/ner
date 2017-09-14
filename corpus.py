@@ -5,13 +5,13 @@ import numpy as np
 import os
 import ftplib
 
+DATA_PATH = '/tmp/ner_gareev'
 SEED = 42
 SPECIAL_TOKENS = ['<PAD>', '<UNK>']
 SPECIAL_TAGS = ['<PAD>']
 DOC_START_STRING = '-DOCSTART- -X- -X- O'
 np.random.seed(SEED)
 random.seed(SEED)
-
 
 
 def is_end_of_sentence(prev_token, current_token):
@@ -32,10 +32,13 @@ def ftp_gareev_loader():
     tmp_tags = []
     tmp_tokens = []
     prev_token = '\n'
+    if not os.path.exists(DATA_PATH):
+        os.mkdir(DATA_PATH)
+    tmp_file_path = '/tmp/ner_gareev/ner_tmp_file.txt'
     for file_name in ftp.nlst(filematch):
-        with open('data/tmp_file.txt', 'wb') as tmp_f:
+        with open(tmp_file_path, 'wb') as tmp_f:
             ftp.retrbinary('RETR ' + file_name, tmp_f.write)
-        with open('data/tmp_file.txt') as tmp_f:
+        with open(tmp_file_path) as tmp_f:
             lines_list = tmp_f.readlines()
 
         for line in lines_list:
@@ -52,18 +55,42 @@ def ftp_gareev_loader():
                     tmp_tags = []
                     tmp_tokens = []
                 prev_token = token
+    os.remove(tmp_file_path)
 
 
-def dataset_slicer(x_list, y_list, train_part=0.8, dev_part=0.1, test_part=0.1):
-    n_samples = len(x_list)
-    assert np.abs(train_part + dev_part + test_part - 1) < 1e-6
+def dataset_slicer(x_y_list,
+                   train_part=0.8,
+                   valid_part=0.1,
+                   test_part=0.1,
+                   shuffle=True,
+                   file_path=DATA_PATH):
+    if not os.path.exists(DATA_PATH):
+        os.mkdir(DATA_PATH)
+    assert np.abs(train_part + valid_part + test_part - 1) < 1e-6
+    n_samples = len(x_y_list)
 
+    if shuffle:
+        random.shuffle(x_y_list)
 
+    slices = [0] + [int(part * n_samples) for part in (train_part, valid_part, test_part)]
+    slices = np.cumsum(slices)
+    for n, name in enumerate(['train', 'valid', 'test']):
+        start = slices[n]
+        stop = slices[n + 1]
+        with open(os.path.join(DATA_PATH, name + '.txt'), 'w') as f:
+            for tokens, tags in x_y_list[start: stop]:
+                for token, tag in zip(tokens, tags):
+                    f.write(token + ' ' + tag + '\n')
+                f.write('\n')
 
 
 # Gareev preprocessed files reader
 # No doc information preserved
-def data_reader_gareev(data_path='./data', data_type=None):
+def data_reader_gareev(data_path=None, data_type=None):
+    if data_path is None:
+        xy = list(ftp_gareev_loader())
+        dataset_slicer(xy)
+        data_path = DATA_PATH
     data = dict()
     if data_type is not None:
         ['train', 'test', 'valid']
@@ -298,8 +325,8 @@ class Corpus:
 
 if __name__ == '__main__':
     # data = data_reader()
-    for x, y in ftp_gareev_loader():
-        print(x, y)
+    xy = list(ftp_gareev_loader())
+    dataset_slicer(xy)
     corpus = Corpus()
     corpus.load_embeddings('/home/arcady/Data/nlp/embeddings_lenta.vec')
     batch = corpus.batch_generator(32, dataset_type='test').__next__()
