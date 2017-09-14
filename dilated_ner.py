@@ -187,8 +187,9 @@ class DilatedNER:
 
     def eval_conll(self,
                    output_filepath='output.txt',
-                   report_file_path='conll_evaluation.txt',
+                   report_file_name='conll_evaluation.txt',
                    dataset_type='test'):
+        report_file_path = os.path.join(DATA_PATH, report_file_name)
         with open(output_filepath, 'w') as f:
             for (x_word, x_char), y_gt in self.corpus.batch_generator(batch_size=32, dataset_type=dataset_type):
                 feed_dict = self._fill_feed_dict(x_word, x_char, y_gt, eval=True)
@@ -202,7 +203,9 @@ class DilatedNER:
                         f.write(' '.join([word] + ['pur'] * 4 + [tag_ground_truth] + [tag_predicted]) + '\n')
 
         conll_evaluation_script = os.path.join('.', 'conlleval')
-        shell_command = 'perl {0} < {1} > {2}'.format(conll_evaluation_script, output_filepath, report_file_path)
+        shell_command = 'perl {0} < {1} > {2}'.format(conll_evaluation_script,
+                                                      output_filepath,
+                                                      report_file_path)
         os.system(shell_command)
         print(dataset_type.capitalize() + ' set')
         with open(report_file_path) as f:
