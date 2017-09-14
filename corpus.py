@@ -1,13 +1,64 @@
 from collections import Counter
 from collections import defaultdict
+import random
 import numpy as np
 import os
+import ftplib
 
 SEED = 42
 SPECIAL_TOKENS = ['<PAD>', '<UNK>']
 SPECIAL_TAGS = ['<PAD>']
 DOC_START_STRING = '-DOCSTART- -X- -X- O'
 np.random.seed(SEED)
+random.seed(SEED)
+
+
+
+def is_end_of_sentence(prev_token, current_token):
+    is_capital = current_token[0].isupper()
+    is_punctuation = prev_token in ('!', '?', '.')
+    return is_capital and is_punctuation
+
+
+def ftp_gareev_loader():
+    server = 'share.ipavlov.mipt.ru'
+    username = 'anonymous'
+    password = ''
+    directory = '/datasets/gareev/'
+    filematch = '*.iob'
+    ftp = ftplib.FTP(server)
+    ftp.login(username, password)
+    ftp.cwd(directory)
+    tmp_tags = []
+    tmp_tokens = []
+    prev_token = '\n'
+    for file_name in ftp.nlst(filematch):
+        with open('data/tmp_file.txt', 'wb') as tmp_f:
+            ftp.retrbinary('RETR ' + file_name, tmp_f.write)
+        with open('data/tmp_file.txt') as tmp_f:
+            lines_list = tmp_f.readlines()
+
+        for line in lines_list:
+            if len(line) > 2:
+                token, tag = line.split()
+                if not is_end_of_sentence(prev_token, token):
+                    tmp_tags.append(tag)
+                    tmp_tokens.append(token)
+                elif len(tmp_tokens) > 0:
+                    yield tmp_tokens, tmp_tags
+                    tmp_tags = [tag]
+                    tmp_tokens = [token]
+                else:
+                    tmp_tags = []
+                    tmp_tokens = []
+                prev_token = token
+
+
+def dataset_slicer(x_list, y_list, train_part=0.8, dev_part=0.1, test_part=0.1):
+    n_samples = len(x_list)
+    assert np.abs(train_part + dev_part + test_part - 1) < 1e-6
+
+
 
 
 # Gareev preprocessed files reader
@@ -247,6 +298,8 @@ class Corpus:
 
 if __name__ == '__main__':
     # data = data_reader()
+    for x, y in ftp_gareev_loader():
+        print(x, y)
     corpus = Corpus()
     corpus.load_embeddings('/home/arcady/Data/nlp/embeddings_lenta.vec')
     batch = corpus.batch_generator(32, dataset_type='test').__next__()
