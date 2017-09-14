@@ -248,7 +248,7 @@ if __name__ == '__main__':
                      embeddings_dropout=embeddings_dropout,
                      dense_dropout=dense_dropout)
     # Training the model
-    ner.fit(epochs=2,
+    ner.fit(epochs=10,
             batch_size=8,
             learning_rate=1e-3,
             dropout_rate=0.5)
