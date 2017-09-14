@@ -59,11 +59,10 @@ def ftp_gareev_loader():
 
 
 def dataset_slicer(x_y_list,
-                   train_part=0.8,
-                   valid_part=0.1,
-                   test_part=0.1,
-                   shuffle=True,
-                   file_path=DATA_PATH):
+                   train_part=0.6,
+                   valid_part=0.2,
+                   test_part=0.2,
+                   shuffle=True):
     if not os.path.exists(DATA_PATH):
         os.mkdir(DATA_PATH)
     assert np.abs(train_part + valid_part + test_part - 1) < 1e-6
@@ -88,13 +87,17 @@ def dataset_slicer(x_y_list,
 # No doc information preserved
 def data_reader_gareev(data_path=None, data_type=None):
     if data_path is None:
-        xy_list = list(ftp_gareev_loader())
-        dataset_slicer(xy_list)
+        # Maybe download
+        if not os.path.exists(os.path.join(DATA_PATH, 'train.txt')):
+            xy_list = list(ftp_gareev_loader())
+            dataset_slicer(xy_list)
         data_path = DATA_PATH
     data = dict()
-    if data_type is not None:
-        ['train', 'test', 'valid']
-    for key in ['train', 'test', 'valid']:
+    if data_type is None:
+        data_types = ['train', 'test', 'valid']
+    else:
+        data_types = [data_type]
+    for key in data_types:
         path = os.path.join(os.path.join(data_path, key + '.txt'))
         x = []
         y = []
@@ -120,8 +123,10 @@ def data_reader_gareev(data_path=None, data_type=None):
 def data_reader(data_path='data/', data_type=None):
     data = dict()
     if data_type is not None:
-        ['train', 'test', 'valid']
-    for key in ['train', 'test', 'valid']:
+        data_types = ['train', 'test', 'valid']
+    else:
+        data_types = [data_type]
+    for key in data_types:
         path = os.path.join(data_path + key + '.txt')
         x = []
         y = []
@@ -142,7 +147,8 @@ def data_reader(data_path='data/', data_type=None):
     return data
 
 
-
+# Dictionary class. Each instance holds tags or tokens or characters and provides
+# dictionary like functionality like indices to tokens and tokens to indices.
 class Vocabulary:
     def __init__(self, tokens=None, default_token='<UNK>', is_tags=False):
         if is_tags:
@@ -274,6 +280,21 @@ class Corpus:
                 embeddings[idx] = pre_trained_embeddins_dict[token]
         return embeddings
 
+    def tokens_to_x_xc(self, tokens):
+        n_tokens = len(tokens)
+        tok_idxs = self.token_dict.toks2idxs(tokens)
+        char_idxs = []
+        max_char_len = 0
+        for token in tokens:
+            char_idxs.append(self.char_dict.toks2idxs(token))
+            max_char_len = max(max_char_len, len(token))
+        toks = np.zeros([1, n_tokens], dtype=np.int32)
+        chars = np.zeros([1, n_tokens, max_char_len], dtype=np.int32)
+        toks[0, :] = tok_idxs
+        for n, char_line in enumerate(char_idxs):
+            chars[0, n, :len(char_line)] = char_line
+        return toks, chars
+
     def batch_generator(self,
                         batch_size,
                         dataset_type='train',
@@ -298,6 +319,7 @@ class Corpus:
             y_list = []
             max_len_token = 0
             max_len_char = 0
+            # TODO: REFACTOR
             for idx in order[batch_start: batch_end]:
                 current_char_list = []
                 for token in utterances[idx]:
@@ -324,9 +346,12 @@ class Corpus:
 
 
 if __name__ == '__main__':
+
     # Create Gareev corpus
-    corpus = Corpus(data_reader_gareev)
+    corp = Corpus(data_reader_gareev)
+    s = 'С . - ПЕТЕРБУРГ , 23 июн - РИА Новости . Группа компаний \" Связной \" ,'
+    print(corp.tokens_to_x_xc(s.split()))
     # Check batching
     batch_size = 2
-    (x, xc), y = corpus.batch_generator(batch_size, dataset_type='test').__next__()
+    (x, xc), y = corp.batch_generator(batch_size, dataset_type='test').__next__()
 

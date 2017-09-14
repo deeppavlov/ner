@@ -6,8 +6,12 @@ from corpus import data_reader_gareev
 import os
 from corpus import DATA_PATH
 
+SEED = 42
 MODEL_PATH = DATA_PATH
 MODEL_FILE_NAME = 'ner_model.ckpt'
+
+np.random.seed(SEED)
+tf.set_random_seed(SEED)
 
 
 class DilatedNER:
@@ -124,6 +128,7 @@ class DilatedNER:
         self._sess = sess
         self.corpus = corpus
         self._lr = lr
+        self._dropout = dropout_ph
         self._lr_schedule = lr_schedule
         self._loss_tensor = loss_tensor
         self._dropout = dropout_ph
@@ -185,6 +190,11 @@ class DilatedNER:
                 count += len(x_word)
             self.save()
 
+    def predict(self, x_word, x_char):
+        feed_dict = self._fill_feed_dict(x_word, x_char, eval=True)
+        y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
+        return self.corpus.tag_dict.batch_idxs2batch_toks(y_pred)
+
     def eval_conll(self,
                    output_filepath='output.txt',
                    report_file_name='conll_evaluation.txt',
@@ -212,11 +222,12 @@ class DilatedNER:
             for line in f:
                 print(line)
 
-    def _fill_feed_dict(self, x_w, x_c, y_t, learning_rate=None, eval=False, dropout_rate=1):
+    def _fill_feed_dict(self, x_w, x_c, y_t=None, learning_rate=None, eval=False, dropout_rate=1):
         feed_dict = dict()
         feed_dict[self._x_w] = x_w
         feed_dict[self._x_c] = x_c
-        feed_dict[self._y_t] = y_t
+        if y_t is not None:
+            feed_dict[self._y_t] = y_t
         if learning_rate is not None:
             feed_dict[self._lr] = learning_rate
         if self._use_dropout is not None and not eval:
@@ -241,10 +252,10 @@ if __name__ == '__main__':
     dilated_filter_width = 5
     embeddings_dropout = True
     dense_dropout = True
-    corpus = Corpus(data_reader_gareev)
+    corp = Corpus(data_reader_gareev)
 
     # Creating a convolutional NER model
-    ner = DilatedNER(corpus,
+    ner = DilatedNER(corp,
                      n_layers_per_block=n_layers_per_block,
                      n_blocks=n_blocks,
                      dilated_filter_width=dilated_filter_width,
@@ -258,7 +269,7 @@ if __name__ == '__main__':
 
     # Creating new model and restoring pre-trained weights
     model_path = os.path.join(MODEL_PATH, MODEL_FILE_NAME)
-    ner_ = DilatedNER(corpus,
+    ner_ = DilatedNER(corp,
                       n_layers_per_block=n_layers_per_block,
                       n_blocks=n_blocks,
                       dilated_filter_width=dilated_filter_width,
