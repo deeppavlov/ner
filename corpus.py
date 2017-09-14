@@ -88,8 +88,8 @@ def dataset_slicer(x_y_list,
 # No doc information preserved
 def data_reader_gareev(data_path=None, data_type=None):
     if data_path is None:
-        xy = list(ftp_gareev_loader())
-        dataset_slicer(xy)
+        xy_list = list(ftp_gareev_loader())
+        dataset_slicer(xy_list)
         data_path = DATA_PATH
     data = dict()
     if data_type is not None:
@@ -324,11 +324,9 @@ class Corpus:
 
 
 if __name__ == '__main__':
-    # data = data_reader()
-    xy = list(ftp_gareev_loader())
-    dataset_slicer(xy)
-    corpus = Corpus()
-    corpus.load_embeddings('/home/arcady/Data/nlp/embeddings_lenta.vec')
-    batch = corpus.batch_generator(32, dataset_type='test').__next__()
-    print(batch)
-    print(corpus)
+    # Create Gareev corpus
+    corpus = Corpus(data_reader_gareev)
+    # Check batching
+    batch_size = 2
+    (x, xc), y = corpus.batch_generator(batch_size, dataset_type='test').__next__()
+

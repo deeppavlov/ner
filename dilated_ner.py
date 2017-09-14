@@ -2,10 +2,13 @@ import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 import numpy as np
 from corpus import Corpus
-from corpus import data_reader
-import pickle
 from corpus import data_reader_gareev
 import os
+from corpus import DATA_PATH
+
+MODEL_PATH = DATA_PATH
+MODEL_FILE_NAME = 'ner_model.ckpt'
+
 
 class DilatedNER:
     def __init__(self,
@@ -89,10 +92,8 @@ class DilatedNER:
                                     name='Hidden',
                                     activation=tf.nn.relu)
             if dense_dropout:
-                self._test_1 = units
                 tf.summary.histogram('Dense_no_drop', units)
                 units = tf.nn.dropout(units, dropout_ph)
-                self._test_2 = units
                 tf.summary.histogram('Dense_drop', units)
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer(), name='Output')
         # predictions = tf.argmax(logits, axis=-1)
@@ -108,6 +109,7 @@ class DilatedNER:
         train_op = tf.train.AdamOptimizer(lr_schedule).minimize(loss, global_step=global_step)
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
+
         self.print_number_of_parameters()
 
         self.train_writer = tf.summary.FileWriter('summary', sess.graph)
@@ -134,7 +136,9 @@ class DilatedNER:
 
     def save(self, model_file_path=None):
         if model_file_path is None:
-            model_file_path = '/tmp/ner_model.ckpt'
+            if not os.path.exists(MODEL_PATH):
+                os.mkdir(MODEL_PATH)
+            model_file_path = os.path.join(MODEL_PATH, MODEL_FILE_NAME)
         saver = tf.train.Saver()
         saver.save(self._sess, model_file_path)
 
@@ -235,24 +239,28 @@ if __name__ == '__main__':
     embeddings_dropout = True
     dense_dropout = True
     corpus = Corpus(data_reader_gareev)
-    ner_0 = DilatedNER(corpus,
-                       n_layers_per_block=n_layers_per_block,
-                       n_blocks=n_blocks,
-                       dilated_filter_width=dilated_filter_width,
-                       embeddings_dropout=embeddings_dropout,
-                       dense_dropout=dense_dropout)
 
-    ner_0.fit(epochs=10,
-              batch_size=8,
-              learning_rate=1e-3,
-              dropout_rate=0.5)
+    # Creating a convolutional NER model
+    ner = DilatedNER(corpus,
+                     n_layers_per_block=n_layers_per_block,
+                     n_blocks=n_blocks,
+                     dilated_filter_width=dilated_filter_width,
+                     embeddings_dropout=embeddings_dropout,
+                     dense_dropout=dense_dropout)
+    # Training the model
+    ner.fit(epochs=2,
+            batch_size=8,
+            learning_rate=1e-3,
+            dropout_rate=0.5)
 
-    ner_1 = DilatedNER(corpus,
-                       n_layers_per_block=n_layers_per_block,
-                       n_blocks=n_blocks,
-                       dilated_filter_width=dilated_filter_width,
-                       embeddings_dropout=embeddings_dropout,
-                       dense_dropout=dense_dropout,
-                       pretrained_model_filepath='/tmp/ner_model.ckpt')
-
-    ner_1.eval_conll()
+    # Creating new model and restoring pre-trained weights
+    model_path = os.path.join(MODEL_PATH, MODEL_FILE_NAME)
+    ner_ = DilatedNER(corpus,
+                      n_layers_per_block=n_layers_per_block,
+                      n_blocks=n_blocks,
+                      dilated_filter_width=dilated_filter_width,
+                      embeddings_dropout=embeddings_dropout,
+                      dense_dropout=dense_dropout,
+                      pretrained_model_filepath=model_path)
+    # Evaluate loaded model
+    ner_.eval_conll()
