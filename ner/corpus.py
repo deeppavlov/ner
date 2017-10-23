@@ -221,7 +221,7 @@ class Corpus:
         # Prepare y batch
         if batch_y is not None:
             for n, tags in enumerate(batch_y):
-                y[n, :len(tags)] = self.token_dict.toks2idxs(tags)
+                y[n, :len(tags)] = self.tag_dict.toks2idxs(tags)
 
         return (x_token, x_char), y
 
