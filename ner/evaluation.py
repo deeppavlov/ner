@@ -120,9 +120,17 @@ def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
         total_precision += results[tag]['precision'] * n_pred
         total_recall += results[tag]['recall'] * n_true
         total_f1 += results[tag]['f1'] * n_true
-    accuracy = total_correct / total_true_entities * 100
-    total_precision = total_precision / total_predicted_entities
-    total_recall = total_recall / total_true_entities
+    if total_true_entities > 0:
+        accuracy = total_correct / total_true_entities * 100
+        total_recall = total_recall / total_true_entities
+    else:
+        accuracy = 0
+        total_recall = 0
+    if total_predicted_entities > 0:
+        total_precision = total_precision / total_predicted_entities
+    else:
+        total_precision = 0
+
     if total_precision + total_recall > 0:
         total_f1 = 2 * total_precision * total_recall / (total_precision + total_recall)
     else:
