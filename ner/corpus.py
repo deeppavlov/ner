@@ -2,149 +2,16 @@ from collections import Counter
 from collections import defaultdict
 import random
 import numpy as np
-import os
-import ftplib
 
-DATA_PATH = '/tmp/ner_gareev'
+
+DATA_PATH = '/tmp/ner'
+DOC_START_STRING = '-DOCSTART-'
 SEED = 42
 SPECIAL_TOKENS = ['<PAD>', '<UNK>']
 SPECIAL_TAGS = ['<PAD>']
-DOC_START_STRING = '-DOCSTART- -X- -X- O'
+
 np.random.seed(SEED)
 random.seed(SEED)
-
-
-def is_end_of_sentence(prev_token, current_token):
-    is_capital = current_token[0].isupper()
-    is_punctuation = prev_token in ('!', '?', '.')
-    return is_capital and is_punctuation
-
-
-def ftp_gareev_loader():
-    server = 'share.ipavlov.mipt.ru'
-    username = 'anonymous'
-    password = ''
-    directory = '/datasets/gareev/'
-    filematch = '*.iob'
-    ftp = ftplib.FTP(server)
-    ftp.login(username, password)
-    ftp.cwd(directory)
-    tmp_tags = []
-    tmp_tokens = []
-    prev_token = '\n'
-    if not os.path.exists(DATA_PATH):
-        os.mkdir(DATA_PATH)
-    tmp_file_path = '/tmp/ner_gareev/ner_tmp_file.txt'
-    for file_name in ftp.nlst(filematch):
-        with open(tmp_file_path, 'wb') as tmp_f:
-            ftp.retrbinary('RETR ' + file_name, tmp_f.write)
-        with open(tmp_file_path) as tmp_f:
-            lines_list = tmp_f.readlines()
-
-        for line in lines_list:
-            if len(line) > 2:
-                token, tag = line.split()
-                if not is_end_of_sentence(prev_token, token):
-                    tmp_tags.append(tag)
-                    tmp_tokens.append(token)
-                elif len(tmp_tokens) > 0:
-                    yield tmp_tokens, tmp_tags
-                    tmp_tags = [tag]
-                    tmp_tokens = [token]
-                else:
-                    tmp_tags = []
-                    tmp_tokens = []
-                prev_token = token
-    os.remove(tmp_file_path)
-
-
-def dataset_slicer(x_y_list,
-                   train_part=0.6,
-                   valid_part=0.2,
-                   test_part=0.2,
-                   shuffle=True):
-    if not os.path.exists(DATA_PATH):
-        os.mkdir(DATA_PATH)
-    assert np.abs(train_part + valid_part + test_part - 1) < 1e-6
-    n_samples = len(x_y_list)
-
-    if shuffle:
-        random.shuffle(x_y_list)
-
-    slices = [0] + [int(part * n_samples) for part in (train_part, valid_part, test_part)]
-    slices = np.cumsum(slices)
-    for n, name in enumerate(['train', 'valid', 'test']):
-        start = slices[n]
-        stop = slices[n + 1]
-        with open(os.path.join(DATA_PATH, name + '.txt'), 'w') as f:
-            for tokens, tags in x_y_list[start: stop]:
-                for token, tag in zip(tokens, tags):
-                    f.write(token + ' ' + tag + '\n')
-                f.write('\n')
-
-
-# Gareev preprocessed files reader
-# No doc information preserved
-def data_reader_gareev(data_path=None, data_type=None):
-    if data_path is None:
-        # Maybe download
-        if not os.path.exists(os.path.join(DATA_PATH, 'train.txt')):
-            xy_list = list(ftp_gareev_loader())
-            dataset_slicer(xy_list)
-        data_path = DATA_PATH
-    data = dict()
-    if data_type is None:
-        data_types = ['train', 'test', 'valid']
-    else:
-        data_types = [data_type]
-    for key in data_types:
-        path = os.path.join(os.path.join(data_path, key + '.txt'))
-        x = []
-        y = []
-        with open(path) as f:
-            tokens = []
-            tags = []
-            for line in f:
-                if len(line) > 1 and DOC_START_STRING not in line:
-                    items = line.split()
-                    tokens.append(items[0])
-                    tags.append(items[-1])
-                elif len(tokens) > 0:
-                    x.append(tokens)
-                    y.append(tags)
-                    tokens = []
-                    tags = []
-        data[key] = (x, y)
-    return data
-
-
-# CoNLL-2003 preprocessed files reader
-# No doc information preserved
-def data_reader(data_path='data/', data_type=None):
-    data = dict()
-    if data_type is not None:
-        data_types = ['train', 'test', 'valid']
-    else:
-        data_types = [data_type]
-    for key in data_types:
-        path = os.path.join(data_path + key + '.txt')
-        x = []
-        y = []
-        with open(path) as f:
-            tokens = []
-            tags = []
-            for line in f:
-                if len(line) > 1 and DOC_START_STRING not in line:
-                    items = line.split()
-                    tokens.append(items[0])
-                    tags.append(items[-1])
-                elif len(tokens) > 0:
-                    x.append(tokens)
-                    y.append(tags)
-                    tokens = []
-                    tags = []
-        data[key] = (x, y)
-    return data
 
 
 # Dictionary class. Each instance holds tags or tokens or characters and provides
@@ -163,14 +30,14 @@ class Vocabulary:
             # in SPECIAL_TOKENS
             default_ind = special_tokens.index('<UNK>')
             self._t2i = defaultdict(lambda: default_ind)
-        self._i2t = []
+        self._i2t = dict()
         self.frequencies = Counter()
 
         self.counter = 0
         for token in special_tokens:
             self._t2i[token] = self.counter
             self.frequencies[token] += 0
-            self._i2t.append(token)
+            self._i2t[self.counter] = token
             self.counter += 1
         if tokens is not None:
             self.update_dict(tokens)
@@ -179,7 +46,7 @@ class Vocabulary:
         for token in tokens:
             if token not in self._t2i:
                 self._t2i[token] = self.counter
-                self._i2t.append(token)
+                self._i2t[self.counter] = token
                 self.counter += 1
             self.frequencies[token] += 1
 
@@ -226,14 +93,16 @@ class Vocabulary:
 
 
 class Corpus:
-    def __init__(self, reader=None, embeddings_file_path=None):
-        if reader is None:
-            self.dataset = data_reader()
-        else:
-            self.dataset = reader()
-        self.token_dict = Vocabulary(self.get_tokens())
-        self.tag_dict = Vocabulary(self.get_tags(), is_tags=True)
-        self.char_dict = Vocabulary(self.get_characters())
+    def __init__(self, dataset=None, embeddings_file_path=None, dicts_filepath=None):
+        if dataset is not None:
+            self.dataset = dataset
+            self.token_dict = Vocabulary(self.get_tokens())
+            self.tag_dict = Vocabulary(self.get_tags(), is_tags=True)
+            self.char_dict = Vocabulary(self.get_characters())
+        elif dicts_filepath is not None:
+            self.dataset = None
+            self.load_corpus_dicts(dicts_filepath)
+
         if embeddings_file_path is not None:
             self.embeddings = self.load_embeddings(embeddings_file_path)
         else:
@@ -280,7 +149,7 @@ class Corpus:
                 embeddings[idx] = pre_trained_embeddins_dict[token]
         return embeddings
 
-    def tokens_to_x_xc(self, tokens):
+    def tokens_to_x_and_xc(self, tokens):
         n_tokens = len(tokens)
         tok_idxs = self.token_dict.toks2idxs(tokens)
         char_idxs = []
@@ -300,9 +169,9 @@ class Corpus:
                         dataset_type='train',
                         shuffle=True,
                         allow_smaller_last_batch=True,
-                        provide_char=True):
-        utterances, tags = self.dataset[dataset_type]
-        n_samples = len(utterances)
+                        return_char=True):
+        tokens_tags_pairs = self.dataset[dataset_type]
+        n_samples = len(tokens_tags_pairs)
         if shuffle:
             order = np.random.permutation(n_samples)
         else:
@@ -313,45 +182,105 @@ class Corpus:
         for k in range(n_batches):
             batch_start = k * batch_size
             batch_end = min((k + 1) * batch_size, n_samples)
-            current_batch_size = batch_end - batch_start
-            x_token_list = []
-            x_char_list = []
-            y_list = []
-            max_len_token = 0
-            max_len_char = 0
-            # TODO: REFACTOR
-            for idx in order[batch_start: batch_end]:
-                current_char_list = []
-                for token in utterances[idx]:
-                    current_char_list.append(self.char_dict.toks2idxs(token))
-                    max_len_char = max(max_len_char, len(token))
-                x_char_list.append(current_char_list)
-                x_token_list.append(self.token_dict.toks2idxs(utterances[idx]))
-                y_list.append(self.tag_dict.toks2idxs(tags[idx]))
-                max_len_token = max(max_len_token, len(tags[idx]))
-            x_token = np.ones([current_batch_size, max_len_token], dtype=np.int32) * self.token_dict['<PAD>']
-            x_char = np.ones([current_batch_size, max_len_token, max_len_char], dtype=np.int32) * self.char_dict['<PAD>']
-            y = np.ones([current_batch_size, max_len_token], dtype=np.int32) * self.tag_dict['<PAD>']
-            for n in range(current_batch_size):
-                utt_len = len(x_token_list[n])
-                x_token[n, :utt_len] = x_token_list[n]
-                y[n, :utt_len] = y_list[n]
-                for k, ch in enumerate(x_char_list[n]):
-                    char_len = len(ch)
-                    x_char[n, k, :char_len] = ch
-            if provide_char:
+            x_batch = [tokens_tags_pairs[ind][0] for ind in order[batch_start: batch_end]]
+            y_batch = [tokens_tags_pairs[ind][1] for ind in order[batch_start: batch_end]]
+            (x_token, x_char), y = self.tokens_batch_to_numpy_batch(x_batch, y_batch, return_char)
+            if return_char:
                 yield (x_token, x_char), y
             else:
                 yield x_token, y
 
+    def tokens_batch_to_numpy_batch(self, batch_x, batch_y=None, return_char=True):
+        # Determine dimensions
+        batch_size = len(batch_x)
+        max_utt_len = max([len(utt) for utt in batch_x])
+        max_token_len = max([len(token) for utt in batch_x for token in utt])
+
+        # Prepare numpy arrays
+        x_token = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.token_dict['<PAD>']
+        if return_char:
+            x_char = np.ones([batch_size, max_utt_len, max_token_len], dtype=np.int32) * self.char_dict['<PAD>']
+        else:
+            x_char = None
+        if batch_y is not None:
+            y = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.tag_dict['<PAD>']
+        else:
+            y = None
+
+        # Prepare x batch
+        for n, utterance in enumerate(batch_x):
+            x_token[n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
+            if return_char:
+                for k, token in enumerate(utterance):
+                    x_char[n, k, :len(token)] = self.char_dict.toks2idxs(token)
+
+        # Prepare y batch
+        if batch_y is not None:
+            for n, tags in enumerate(batch_y):
+                y[n, :len(tags)] = self.token_dict.toks2idxs(tags)
+
+        return (x_token, x_char), y
+
+    def save_corpus_dicts(self, filename='dict.txt'):
+        # Token dict
+        token_dict = self.token_dict._i2t
+        with open(filename, 'w') as f:
+            f.write('-TOKEN-DICT-\n')
+            for ind in range(len(token_dict)):
+                f.write(token_dict[ind] + '\n')
+            f.write('\n')
+
+        # Tag dict
+        token_dict = self.tag_dict._i2t
+        with open(filename, 'a') as f:
+            f.write('-TAG-DICT-\n')
+            for ind in range(len(token_dict)):
+                f.write(token_dict[ind] + '\n')
+            f.write('\n')
+
+        # Character dict
+        token_dict = self.char_dict._i2t
+        with open(filename, 'a') as f:
+            f.write('-CHAR-DICT-\n')
+            for ind in range(len(token_dict)):
+                f.write(token_dict[ind] + '\n')
+            f.write('\n')
+
+    def load_corpus_dicts(self, filename='dict.txt'):
+        with open(filename) as f:
+            # Token dict
+            tokens = list()
+            line = f.readline()
+            assert line.strip() == '-TOKEN-DICT-'
+            while len(line) > 0:
+                line = f.readline().strip()
+                if len(line) > 0:
+                    tokens.append(line)
+            self.token_dict = Vocabulary(tokens)
+
+            # Tag dictappend
+            line = f.readline()
+            tags = list()
+            assert line.strip() == '-TAG-DICT-'
+            while len(line) > 0:
+                line = f.readline().strip()
+                if len(line) > 0:
+                    tags.append(line)
+            self.tag_dict = Vocabulary(tags, is_tags=True)
+
+            # Char dict
+            line = f.readline()
+            chars = list()
+            assert line.strip() == '-CHAR-DICT-'
+            while len(line) > 0:
+                line = f.readline().strip()
+                if len(line) > 0:
+                    chars.append(line)
+            self.char_dict = Vocabulary(chars)
+
 
 if __name__ == '__main__':
-
-    # Create Gareev corpus
-    corp = Corpus(data_reader_gareev)
-    s = 'С . - ПЕТЕРБУРГ , 23 июн - РИА Новости . Группа компаний \" Связной \" ,'
-    print(corp.tokens_to_x_xc(s.split()))
+    corp = Corpus()
     # Check batching
     batch_size = 2
     (x, xc), y = corp.batch_generator(batch_size, dataset_type='test').__next__()
-

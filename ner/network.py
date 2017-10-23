@@ -1,143 +1,105 @@
-import tensorflow as tf
-from tensorflow.contrib.layers import xavier_initializer
-import numpy as np
-from corpus import Corpus
-from corpus import data_reader_gareev
 import os
-from corpus import DATA_PATH
+from collections import defaultdict
+
+import numpy as np
+import tensorflow as tf
+from .layers import character_embedding_network
+from .layers import embedding_layer
+from .layers import stacked_convolutions
+from tensorflow.contrib.layers import xavier_initializer
+
+from .corpus import Corpus
+from .evaluation import precision_recall_f1
+
 
 SEED = 42
-MODEL_PATH = DATA_PATH
+MODEL_PATH = 'model/'
 MODEL_FILE_NAME = 'ner_model.ckpt'
 
-np.random.seed(SEED)
-tf.set_random_seed(SEED)
 
-
-class DilatedNER:
+class NER:
     def __init__(self,
                  corpus,
-                 token_emb_dim=100,
-                 char_emb_dim=25,
-                 char_n_filters=25,
-                 char_filter_width=3,
-                 n_layers_per_block=4,
-                 n_blocks=1,
-                 dilated_filter_width=3,
+                 n_conv_layers=3,
+                 n_filters=100,
+                 filter_width=3,
+                 token_embeddings_dim=100,
+                 char_embeddings_dim=25,
+                 pretrained_model_filepath=None,
                  embeddings_dropout=False,
                  dense_dropout=False,
-                 pretrained_model_filepath=None):
+                 use_batch_norm=False,
+                 logging=False):
         tf.reset_default_graph()
+
         n_tags = len(corpus.tag_dict)
         n_tokens = len(corpus.token_dict)
         n_chars = len(corpus.char_dict)
-        # Placeholders
-        x_w = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_word')
-        x_c = tf.placeholder(dtype=tf.int32, shape=[None, None, None], name='x_char')
-        y_t = tf.placeholder(dtype=tf.int32, shape=[None, None], name='y_tag')
-        lr = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
 
-        # Load embeddings
+        # Create placeholders
+        x_word = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_word')
+        x_char = tf.placeholder(dtype=tf.int32, shape=[None, None, None], name='x_char')
+        y_true = tf.placeholder(dtype=tf.int32, shape=[None, None], name='y_tag')
+        # Auxiliary placeholders
+        learning_rate_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
+        dropout_ph = tf.placeholder_with_default(1.0, shape=[])
+        training_ph = tf.placeholder_with_default(False, shape=[])
+
+        # Embeddings
         with tf.variable_scope('Embeddings'):
-            if corpus.embeddings is not None:
-                w_embeddings = corpus.embeddings.astype(np.float32)
-                w_embeddings = tf.Variable(w_embeddings, name='Token_Emb_Dict', trainable=False)
+            w_emb = embedding_layer(x_word, n_tokens=n_tokens, token_embedding_dim=token_embeddings_dim)
+            c_emb = character_embedding_network(x_char, n_characters=n_chars, char_embedding_dim=char_embeddings_dim)
+            emb = tf.concat([w_emb, c_emb], axis=-1)
 
-            else:
-                w_embeddings = 0.1 * np.random.randn(n_tokens, token_emb_dim).astype(np.float32)
-                w_embeddings = tf.Variable(w_embeddings, name='Token_Emb_Dict')
-                self._w_emb = w_embeddings
-            c_embeddings = 0.1 * np.random.randn(n_chars, char_emb_dim).astype(np.float32)
+        # First convolutional network
+        with tf.variable_scope('ConvNet'):
+            units = stacked_convolutions(emb,
+                                         # rabbit_hole_depth=2,
+                                         n_filters=n_filters,
+                                         n_layers=n_conv_layers,
+                                         filter_width=filter_width,
+                                         use_batch_norm=use_batch_norm,
+                                         training_ph=training_ph)
 
-            c_embeddings = tf.Variable(c_embeddings, name='Char_Emb_Dict')
-            # Word embedding layer
-            w_emb = tf.nn.embedding_lookup(w_embeddings, x_w)
+        # Classifier
+        with tf.variable_scope('Classifier'):
+            logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
+            predictions = tf.argmax(logits, axis=-1)
 
-        dropout_ph = tf.placeholder_with_default(1.0, [], name='dropout_ph')
-
-        if embeddings_dropout:
-            w_emb = tf.nn.dropout(w_emb, dropout_ph)
-
-        # Character embedding network
-        with tf.variable_scope('Char_Emb_Network'):
-            # Character embedding layer
-            c_emb = tf.nn.embedding_lookup(c_embeddings, x_c)
-
-            # Character embedding network
-            char_conv = tf.layers.conv2d(c_emb, char_n_filters, (1, char_filter_width), padding='same', name='char_conv')
-            char_emb = tf.reduce_max(char_conv, axis=2)
-
-        wc_features = tf.concat([char_emb, w_emb], axis=-1)
-
-        # Cutdown dimensionality of the network via projection
-        units = tf.layers.dense(wc_features, 50, kernel_initializer=xavier_initializer())
-        n_filters_dilated = char_n_filters + token_emb_dim
-
-        for n_block in range(n_blocks):
-            reuse_layer = n_block > 0
-
-            for n_layer in range(n_layers_per_block):
-                units = tf.layers.conv1d(units,
-                                         n_filters_dilated,
-                                         dilated_filter_width,
-                                         padding='same',
-                                         # dilation_rate=2 ** n_layer,
-                                         name='Layer_' + str(n_layer),
-                                         reuse=reuse_layer,
-                                         activation=None,
-                                         kernel_initializer=xavier_initializer())
-                units = tf.nn.relu(units)
-        if dense_dropout:
-            units = tf.nn.dropout(units, dropout_ph)
-        with tf.variable_scope('Dense_head'):
-            units = tf.layers.dense(units,
-                                    n_filters_dilated,
-                                    kernel_initializer=xavier_initializer(),
-                                    name='Hidden',
-                                    activation=tf.nn.relu)
-            if dense_dropout:
-                tf.summary.histogram('Dense_no_drop', units)
-                units = tf.nn.dropout(units, dropout_ph)
-                tf.summary.histogram('Dense_drop', units)
-            logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer(), name='Output')
-        # predictions = tf.argmax(logits, axis=-1)
-        ground_truth_labels = tf.one_hot(y_t, n_tags)
+        # Loss with masking
+        ground_truth_labels = tf.one_hot(y_true, n_tags)
         loss_tensor = tf.nn.softmax_cross_entropy_with_logits(labels=ground_truth_labels, logits=logits)
-        loss_tensor = loss_tensor * tf.cast(tf.not_equal(x_w, corpus.token_dict.tok2idx('<PAD>')), tf.float32)
-
-        predictions = tf.argmax(logits, axis=-1)
+        loss_tensor = loss_tensor * tf.cast(tf.not_equal(x_word, corpus.token_dict.tok2idx('<PAD>')), tf.float32)
         loss = tf.reduce_mean(loss_tensor)
 
-        global_step = tf.Variable(0, trainable=False)
-        lr_schedule = tf.train.exponential_decay(lr, global_step, decay_steps=1024, decay_rate=0.5, staircase=True)
-        train_op = tf.train.AdamOptimizer(lr_schedule).minimize(loss, global_step=global_step)
+        # Get training op
+        train_op = self.get_optimizer(loss, learning_rate_ph, lr_decay_rate=0.5, decay_steps=1024)
+
+        # Initialize session
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
 
         self.print_number_of_parameters()
-
-        self.train_writer = tf.summary.FileWriter('summary', sess.graph)
+        if logging:
+            self.train_writer = tf.summary.FileWriter('summary', sess.graph)
 
         self.summary = tf.summary.merge_all()
-        self._x_w = x_w
-        self._x_c = x_c
-        self._y_t = y_t
+        self._x_w = x_word
+        self._x_c = x_char
+        self._y_true = y_true
         self._y_pred = predictions
         self._loss = loss
         self._train_op = train_op
         self._sess = sess
         self.corpus = corpus
-        self._lr = lr
+        self._learning_rate_ph = learning_rate_ph
         self._dropout = dropout_ph
-        self._lr_schedule = lr_schedule
         self._loss_tensor = loss_tensor
-        self._dropout = dropout_ph
         self._use_dropout = True if embeddings_dropout or dense_dropout else None
         if pretrained_model_filepath is not None:
             self.load(pretrained_model_filepath)
-
-        #DEBUG
-        self.global_step = global_step
+        self._training_ph = training_ph
+        self._logging = logging
 
     def save(self, model_file_path=None):
         if model_file_path is None:
@@ -151,86 +113,79 @@ class DilatedNER:
         saver = tf.train.Saver()
         saver.restore(self._sess, model_file_path)
 
-    def get_l2_loss(self):
-        vars = tf.trainable_variables()
-        l2_loss = 0
-        for var in vars:
-            if 'kernel' in var.name:
-                l2_loss += tf.nn.l2_loss(var)
-        return l2_loss
-
     def train_on_batch(self, x_word, x_char, y_tag):
-        feed_dict = {self._x_w: x_word, self._x_c: x_char, self._y_t: y_tag}
+        feed_dict = {self._x_w: x_word, self._x_c: x_char, self._y_true: y_tag}
         self._sess.run(self._train_op, feed_dict=feed_dict)
 
     def print_number_of_parameters(self):
         print('Number of parameters: ')
         vars = tf.trainable_variables()
-        blocks = ['Token_Emb_Dict', 'Char_Emb_Dict', 'Char_Emb_Network', 'Layer', 'Dense']
+        blocks = defaultdict(int)
+        for var in vars:
+            # Get the top level scope name of variable
+            block_name = var.name.split('/')[0]
+            number_of_parameters = np.prod(var.get_shape().as_list())
+            blocks[block_name] += number_of_parameters
         for block_name in blocks:
-            par_count = 0
-            for var in vars:
-                if block_name in var.name:
-                    par_count += np.prod(var.get_shape().as_list())
-            print(block_name + ':', par_count)
+            print(block_name, blocks[block_name])
+        total_num_parameters = np.sum(list(blocks.values()))
+        print('Total number of parameters equal {}'.format(total_num_parameters))
 
     def fit(self, batch_gen=None, batch_size=32, learning_rate=1e-3, epochs=1, dropout_rate=0.5):
         for epoch in range(epochs):
-
             count = 0
-            self.eval_conll(dataset_type='train')
-            self.eval_conll(dataset_type='valid')
-            self.eval_conll(dataset_type='test')
+            print('Epoch {}'.format(epoch))
             if batch_gen is None:
                 batch_generator = self.corpus.batch_generator(batch_size, dataset_type='train')
             for (x_word, x_char), y_tag in batch_generator:
-                feed_dict = self._fill_feed_dict(x_word, x_char, y_tag, learning_rate, dropout_rate=dropout_rate)
-                summary, _ = self._sess.run([self.summary, self._train_op], feed_dict=feed_dict)
-                self.train_writer.add_summary(summary)
+                feed_dict = self._fill_feed_dict(x_word,
+                                                 x_char,
+                                                 y_tag,
+                                                 learning_rate,
+                                                 dropout_rate=dropout_rate,
+                                                 training=True)
+                if self._logging:
+                    summary, _ = self._sess.run([self.summary, self._train_op], feed_dict=feed_dict)
+                    self.train_writer.add_summary(summary)
+
+                self._sess.run(self._train_op, feed_dict=feed_dict)
                 count += len(x_word)
+                # print('Learning rate: ', self._sess.run(self._learning_rate_decayed, feed_dict))
             self.save()
+        self.eval_conll(dataset_type='train')
+        self.eval_conll(dataset_type='valid')
+        self.eval_conll(dataset_type='test')
 
     def predict(self, x_word, x_char):
-        feed_dict = self._fill_feed_dict(x_word, x_char, eval=True)
+        feed_dict = self._fill_feed_dict(x_word, x_char, training=False)
         y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
-        return self.corpus.tag_dict.batch_idxs2batch_toks(y_pred)
+        return self.corpus.tag_dict.batch_idxs2batch_toks(y_pred, filter_paddings=True)
 
-    def eval_conll(self,
-                   output_filepath='output.txt',
-                   report_file_name='conll_evaluation.txt',
-                   dataset_type='test'):
-        report_file_path = os.path.join(DATA_PATH, report_file_name)
-        with open(output_filepath, 'w') as f:
-            for (x_word, x_char), y_gt in self.corpus.batch_generator(batch_size=32, dataset_type=dataset_type):
-                feed_dict = self._fill_feed_dict(x_word, x_char, y_gt, eval=True)
-                y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
+    def eval_conll(self, dataset_type='test'):
+        y_true_list = list()
+        y_pred_list = list()
+        print('Eval on {}:'.format(dataset_type))
+        for (x_word, x_char), y_gt in self.corpus.batch_generator(batch_size=32, dataset_type=dataset_type):
+            y_pred = self.predict(x_word, x_char)
+            y_gt = self.corpus.tag_dict.batch_idxs2batch_toks(y_gt, filter_paddings=True)
+            for tags_pred, tags_gt in zip(y_pred, y_gt):
+                for tag_predicted, tag_ground_truth in zip(tags_pred, tags_gt):
+                    y_true_list.append(tag_ground_truth)
+                    y_pred_list.append(tag_predicted)
+                y_true_list.append('O')
+                y_pred_list.append('O')
+        return precision_recall_f1(y_true_list, y_pred_list)
 
-                x_word = self.corpus.token_dict.batch_idxs2batch_toks(x_word, filter_paddings=True)
-                y_gt = self.corpus.tag_dict.batch_idxs2batch_toks(y_gt, filter_paddings=True)
-                y_pred = self.corpus.tag_dict.batch_idxs2batch_toks(y_pred, filter_paddings=True)
-                for utterance, tags_pred, tags_gt in zip(x_word, y_pred, y_gt):
-                    for word, tag_predicted, tag_ground_truth in zip(utterance, tags_pred, tags_gt):
-                        f.write(' '.join([word] + ['pur'] * 4 + [tag_ground_truth] + [tag_predicted]) + '\n')
-
-        conll_evaluation_script = os.path.join('.', 'conlleval')
-        shell_command = 'perl {0} < {1} > {2}'.format(conll_evaluation_script,
-                                                      output_filepath,
-                                                      report_file_path)
-        os.system(shell_command)
-        print(dataset_type.capitalize() + ' set')
-        with open(report_file_path) as f:
-            for line in f:
-                print(line)
-
-    def _fill_feed_dict(self, x_w, x_c, y_t=None, learning_rate=None, eval=False, dropout_rate=1):
+    def _fill_feed_dict(self, x_w, x_c, y_t=None, learning_rate=None, training=False, dropout_rate=1):
         feed_dict = dict()
         feed_dict[self._x_w] = x_w
         feed_dict[self._x_c] = x_c
+        feed_dict[self._training_ph] = training
         if y_t is not None:
-            feed_dict[self._y_t] = y_t
+            feed_dict[self._y_true] = y_t
         if learning_rate is not None:
-            feed_dict[self._lr] = learning_rate
-        if self._use_dropout is not None and not eval:
+            feed_dict[self._learning_rate_ph] = learning_rate
+        if self._use_dropout is not None and training:
             feed_dict[self._dropout] = dropout_rate
         else:
             feed_dict[self._dropout] = 1.0
@@ -240,41 +195,70 @@ class DilatedNER:
         num_tokens = 0
         loss = 0
         for (x_w, x_c), y_t in self.corpus.batch_generator(batch_size=batch_size, dataset_type=data_type):
-            feed_dict = self._fill_feed_dict(x_w, x_c, y_t, eval=True)
+            feed_dict = self._fill_feed_dict(x_w, x_c, y_t, training=False)
             loss += np.sum(self._sess.run(self._loss_tensor, feed_dict=feed_dict))
             num_tokens += np.sum(self.corpus.token_dict.is_pad(x_w))
         return loss / num_tokens
 
+    @staticmethod
+    def get_trainable_variables(trainable_scope_names=None):
+        vars = tf.trainable_variables()
+        if trainable_scope_names is not None:
+            vars_to_train = list()
+            for scope_name in trainable_scope_names:
+                for var in vars:
+                    if var.name.startswith(scope_name):
+                        vars_to_train.append(var)
+            return vars_to_train
+        else:
+            return vars
+
+    def get_optimizer(self, loss, learning_rate, learnable_scopes=None, lr_decay_rate=None, decay_steps=None):
+        global_step = tf.Variable(0, trainable=False)
+        if lr_decay_rate is not None:
+            learning_rate = tf.train.exponential_decay(learning_rate,
+                                                       global_step,
+                                                       decay_steps=decay_steps,
+                                                       decay_rate=lr_decay_rate,
+                                                       staircase=True)
+            self._learning_rate_decayed = learning_rate
+        variables = self.get_trainable_variables(learnable_scopes)
+        train_op = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step, var_list=variables)
+        return train_op
+
+    def predict_for_token_batch(self, tokens_batch):
+        (batch_tok, batch_char), _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
+        # Prediction indices
+        pred_idxs = self._sess.run(self._y_pred, feed_dict={self._x_w: batch_tok, self._x_c: batch_char})
+        predictions_batch = self.corpus.tag_dict.batch_idxs2batch_toks(pred_idxs, filter_paddings=True)
+        predictions_batch_no_pad = list()
+        for n, predicted_tags in enumerate(predictions_batch):
+            predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
+        return predictions_batch_no_pad
+
 
 if __name__ == '__main__':
-    n_layers_per_block = 3
-    n_blocks = 1
-    dilated_filter_width = 5
-    embeddings_dropout = True
-    dense_dropout = True
-    corp = Corpus(data_reader_gareev)
+    corp = Corpus(dicts_filepath='dict.txt')
+    parameters = {'n_conv_layers': 2,
+                  'n_filters': 100,
+                  'filter_width': 5,
+                  'token_embeddings_dim': 100,
+                  'char_embeddings_dim': 25,
+                  'use_batch_norm': False}
 
     # Creating a convolutional NER model
-    ner = DilatedNER(corp,
-                     n_layers_per_block=n_layers_per_block,
-                     n_blocks=n_blocks,
-                     dilated_filter_width=dilated_filter_width,
-                     embeddings_dropout=embeddings_dropout,
-                     dense_dropout=dense_dropout)
+    ner = NER(corp, **parameters)
+
     # Training the model
     ner.fit(epochs=10,
             batch_size=8,
-            learning_rate=1e-3,
+            learning_rate=1e-2,
             dropout_rate=0.5)
 
-    # Creating new model and restoring pre-trained weights
-    model_path = os.path.join(MODEL_PATH, MODEL_FILE_NAME)
-    ner_ = DilatedNER(corp,
-                      n_layers_per_block=n_layers_per_block,
-                      n_blocks=n_blocks,
-                      dilated_filter_width=dilated_filter_width,
-                      embeddings_dropout=embeddings_dropout,
-                      dense_dropout=dense_dropout,
-                      pretrained_model_filepath=model_path)
+    # Creating new predict_for_token_batch model and restoring pre-trained weights
+    path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
+    model_path = os.path.join(path, MODEL_PATH, MODEL_FILE_NAME)
+    ner_ = NER(corp, pretrained_model_filepath=model_path, **parameters)
     # Evaluate loaded model
-    ner_.eval_conll()
+    print('Success')
+    # ner_.eval_conll()
