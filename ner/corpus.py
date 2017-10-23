@@ -108,24 +108,28 @@ class Corpus:
         else:
             self.embeddings = None
 
-    # All tokens for dictionary building
+            # All tokens for dictionary building
+
     def get_tokens(self, data_type='train'):
-        utterances = self.dataset[data_type][0]
-        for utterance in utterances:
-            for token in utterance:
+        for tokens, _ in self.dataset[data_type]:
+            for token in tokens:
                 yield token
 
     # All tags for dictionary building
-    def get_tags(self, data_type='train'):
-        utterances = self.dataset[data_type][1]
-        for utterance in utterances:
-            for tag in utterance:
-                yield tag
+    def get_tags(self, data_type=None):
+        if data_type is None:
+            data_types = self.dataset.keys()
+        else:
+            data_types = [data_type]
+        for data_type in data_types:
+            for _, tags in self.dataset[data_type]:
+                for tag in tags:
+                    yield tag
 
+    # All characters for dictionary building
     def get_characters(self, data_type='train'):
-        utterances = self.dataset[data_type][0]
-        for utterance in utterances:
-            for token in utterance:
+        for tokens, _ in self.dataset[data_type]:
+            for token in tokens:
                 for character in token:
                     yield character
 
