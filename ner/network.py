@@ -31,7 +31,7 @@ class NER:
                  use_batch_norm=False,
                  logging=False):
         tf.reset_default_graph()
-
+        # May be replace
         n_tags = len(corpus.tag_dict)
         n_tokens = len(corpus.token_dict)
         n_chars = len(corpus.char_dict)
@@ -44,6 +44,7 @@ class NER:
         learning_rate_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
         dropout_ph = tf.placeholder_with_default(1.0, shape=[])
         training_ph = tf.placeholder_with_default(False, shape=[])
+        learning_rate_decay_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate_decay')
 
         # Embeddings
         with tf.variable_scope('Embeddings'):
@@ -54,7 +55,6 @@ class NER:
         # First convolutional network
         with tf.variable_scope('ConvNet'):
             units = stacked_convolutions(emb,
-                                         # rabbit_hole_depth=2,
                                          n_filters=n_filters,
                                          n_layers=n_conv_layers,
                                          filter_width=filter_width,
@@ -63,6 +63,7 @@ class NER:
 
         # Classifier
         with tf.variable_scope('Classifier'):
+            units = tf.layers.dense(units, n_filters, kernel_initializer=xavier_initializer())
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
             predictions = tf.argmax(logits, axis=-1)
 
@@ -72,24 +73,20 @@ class NER:
         loss_tensor = loss_tensor * tf.cast(tf.not_equal(x_word, corpus.token_dict.tok2idx('<PAD>')), tf.float32)
         loss = tf.reduce_mean(loss_tensor)
 
-        # Get training op
-        train_op = self.get_optimizer(loss, learning_rate_ph, lr_decay_rate=0.5, decay_steps=1024)
-
         # Initialize session
         sess = tf.Session()
-        sess.run(tf.global_variables_initializer())
 
         self.print_number_of_parameters()
         if logging:
             self.train_writer = tf.summary.FileWriter('summary', sess.graph)
 
         self.summary = tf.summary.merge_all()
+        self._learning_rate_decay_ph = learning_rate_decay_ph
         self._x_w = x_word
         self._x_c = x_char
         self._y_true = y_true
         self._y_pred = predictions
         self._loss = loss
-        self._train_op = train_op
         self._sess = sess
         self.corpus = corpus
         self._learning_rate_ph = learning_rate_ph
@@ -100,6 +97,9 @@ class NER:
             self.load(pretrained_model_filepath)
         self._training_ph = training_ph
         self._logging = logging
+        # Get training op
+        self._train_op = self.get_train_op(loss, learning_rate_ph, lr_decay_rate=learning_rate_decay_ph)
+        sess.run(tf.global_variables_initializer())
 
     def save(self, model_file_path=None):
         if model_file_path is None:
@@ -131,7 +131,7 @@ class NER:
         total_num_parameters = np.sum(list(blocks.values()))
         print('Total number of parameters equal {}'.format(total_num_parameters))
 
-    def fit(self, batch_gen=None, batch_size=32, learning_rate=1e-3, epochs=1, dropout_rate=0.5):
+    def fit(self, batch_gen=None, batch_size=32, learning_rate=1e-3, epochs=1, dropout_rate=0.5, learning_rate_decay=1):
         for epoch in range(epochs):
             count = 0
             print('Epoch {}'.format(epoch))
@@ -143,25 +143,30 @@ class NER:
                                                  y_tag,
                                                  learning_rate,
                                                  dropout_rate=dropout_rate,
-                                                 training=True)
+                                                 training=True,
+                                                 learning_rate_decay=learning_rate_decay)
                 if self._logging:
                     summary, _ = self._sess.run([self.summary, self._train_op], feed_dict=feed_dict)
                     self.train_writer.add_summary(summary)
 
                 self._sess.run(self._train_op, feed_dict=feed_dict)
                 count += len(x_word)
-                # print('Learning rate: ', self._sess.run(self._learning_rate_decayed, feed_dict))
+
+            # DEBUG
+            print('Learning rate: ', self._sess.run(self._learning_rate_decayed, feed_dict))
+
+            self.eval_conll('valid', print_results=True, short_report=True)
             self.save()
-        self.eval_conll(dataset_type='train')
-        self.eval_conll(dataset_type='valid')
-        self.eval_conll(dataset_type='test')
+        self.eval_conll(dataset_type='train', short_report=False)
+        self.eval_conll(dataset_type='valid', short_report=False)
+        self.eval_conll(dataset_type='test', short_report=False)
 
     def predict(self, x_word, x_char):
         feed_dict = self._fill_feed_dict(x_word, x_char, training=False)
         y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
         return self.corpus.tag_dict.batch_idxs2batch_toks(y_pred, filter_paddings=True)
 
-    def eval_conll(self, dataset_type='test'):
+    def eval_conll(self, dataset_type='test', print_results=True, short_report=True):
         y_true_list = list()
         y_pred_list = list()
         print('Eval on {}:'.format(dataset_type))
@@ -174,9 +179,16 @@ class NER:
                     y_pred_list.append(tag_predicted)
                 y_true_list.append('O')
                 y_pred_list.append('O')
-        return precision_recall_f1(y_true_list, y_pred_list)
+        return precision_recall_f1(y_true_list, y_pred_list, print_results, short_report)
 
-    def _fill_feed_dict(self, x_w, x_c, y_t=None, learning_rate=None, training=False, dropout_rate=1):
+    def _fill_feed_dict(self,
+                        x_w,
+                        x_c,
+                        y_t=None,
+                        learning_rate=None,
+                        training=False,
+                        dropout_rate=1,
+                        learning_rate_decay=1):
         feed_dict = dict()
         feed_dict[self._x_w] = x_w
         feed_dict[self._x_c] = x_c
@@ -185,6 +197,7 @@ class NER:
             feed_dict[self._y_true] = y_t
         if learning_rate is not None:
             feed_dict[self._learning_rate_ph] = learning_rate
+            feed_dict[self._learning_rate_decay_ph] = learning_rate_decay
         if self._use_dropout is not None and training:
             feed_dict[self._dropout] = dropout_rate
         else:
@@ -213,8 +226,11 @@ class NER:
         else:
             return vars
 
-    def get_optimizer(self, loss, learning_rate, learnable_scopes=None, lr_decay_rate=None, decay_steps=None):
+    def get_train_op(self, loss, learning_rate, learnable_scopes=None, lr_decay_rate=None):
         global_step = tf.Variable(0, trainable=False)
+        n_training_samples = len(self.corpus.dataset['train'])
+        batch_size = tf.shape(self._x_w)[0]
+        decay_steps = tf.cast(n_training_samples / batch_size, tf.int32)
         if lr_decay_rate is not None:
             learning_rate = tf.train.exponential_decay(learning_rate,
                                                        global_step,
@@ -223,7 +239,11 @@ class NER:
                                                        staircase=True)
             self._learning_rate_decayed = learning_rate
         variables = self.get_trainable_variables(learnable_scopes)
-        train_op = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step, var_list=variables)
+
+        # For batch norm it is necessary to update running averages
+        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(extra_update_ops):
+            train_op = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step, var_list=variables)
         return train_op
 
     def predict_for_token_batch(self, tokens_batch):
@@ -261,4 +281,3 @@ if __name__ == '__main__':
     ner_ = NER(corp, pretrained_model_filepath=model_path, **parameters)
     # Evaluate loaded model
     print('Success')
-    # ner_.eval_conll()
