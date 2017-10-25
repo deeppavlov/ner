@@ -134,23 +134,27 @@ class Corpus:
                     yield character
 
     def load_embeddings(self, file_path):
-        # Embeddins must be in fastText format
+        # Embeddins must be in fastText format either bin or
         print('Loading embeddins...')
-        pre_trained_embeddins_dict = dict()
-        with open(file_path) as f:
-            _ = f.readline()
-            for line in f:
-                token, *embedding = line.split()
-                embedding = np.array([float(val_str) for val_str in embedding])
-                if token in self.token_dict:
-                    pre_trained_embeddins_dict[token] = embedding
-        print('Readed')
-        pre_trained_std = np.std(list(pre_trained_embeddins_dict.values()))
-        embeddings = pre_trained_std * np.random.randn(len(self.token_dict), len(embedding))
-        for idx in range(len(self.token_dict)):
-            token = self.token_dict.idx2tok(idx)
-            if token in pre_trained_embeddins_dict:
-                embeddings[idx] = pre_trained_embeddins_dict[token]
+        if file_path.endswith('.bin'):
+            from gensim.models.wrappers import FastText
+            embeddings = FastText.load_fasttext_format(file_path)
+        else:
+            pre_trained_embeddins_dict = dict()
+            with open(file_path) as f:
+                _ = f.readline()
+                for line in f:
+                    token, *embedding = line.split()
+                    embedding = np.array([float(val_str) for val_str in embedding])
+                    if token in self.token_dict:
+                        pre_trained_embeddins_dict[token] = embedding
+            print('Readed')
+            pre_trained_std = np.std(list(pre_trained_embeddins_dict.values()))
+            embeddings = pre_trained_std * np.random.randn(len(self.token_dict), len(embedding))
+            for idx in range(len(self.token_dict)):
+                token = self.token_dict.idx2tok(idx)
+                if token in pre_trained_embeddins_dict:
+                    embeddings[idx] = pre_trained_embeddins_dict[token]
         return embeddings
 
     def tokens_to_x_and_xc(self, tokens):
@@ -199,9 +203,12 @@ class Corpus:
         batch_size = len(batch_x)
         max_utt_len = max([len(utt) for utt in batch_x])
         max_token_len = max([len(token) for utt in batch_x for token in utt])
-
+        prepare_embeddings_onthego = self.embeddings is not None and not isinstance(self.embeddings, dict)
         # Prepare numpy arrays
-        x_token = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.token_dict['<PAD>']
+        if prepare_embeddings_onthego:  # If the embeddings is a fastText model
+            x_token = np.zeros([batch_size, max_utt_len, self.embeddings.vector_size], dtype=np.float32)
+        else:  # If the embeddings is a token - vector dictionary
+            x_token = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.token_dict['<PAD>']
         if return_char:
             x_char = np.ones([batch_size, max_utt_len, max_token_len], dtype=np.int32) * self.char_dict['<PAD>']
         else:
@@ -213,7 +220,10 @@ class Corpus:
 
         # Prepare x batch
         for n, utterance in enumerate(batch_x):
-            x_token[n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
+            if prepare_embeddings_onthego:
+                x_token[n, :len(utterance), :] = [self.embeddings[token] for token in utterance]
+            else:
+                x_token[n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
             if return_char:
                 for k, token in enumerate(utterance):
                     x_char[n, k, :len(token)] = self.char_dict.toks2idxs(token)

@@ -31,13 +31,17 @@ class NER:
                  use_batch_norm=False,
                  logging=False):
         tf.reset_default_graph()
-        # May be replace
+
         n_tags = len(corpus.tag_dict)
         n_tokens = len(corpus.token_dict)
         n_chars = len(corpus.char_dict)
+        embeddings_onethego = corpus.embeddings is not None and not isinstance(corpus.embeddings, dict)
 
         # Create placeholders
-        x_word = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_word')
+        if embeddings_onethego:
+            x_word = tf.placeholder(dtype=tf.float32, shape=[None, None, corpus.embeddings.vector_size], name='x_word')
+        else:
+            x_word = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_word')
         x_char = tf.placeholder(dtype=tf.int32, shape=[None, None, None], name='x_char')
         y_true = tf.placeholder(dtype=tf.int32, shape=[None, None], name='y_tag')
         # Auxiliary placeholders
@@ -47,10 +51,13 @@ class NER:
         learning_rate_decay_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate_decay')
 
         # Embeddings
-        with tf.variable_scope('Embeddings'):
-            w_emb = embedding_layer(x_word, n_tokens=n_tokens, token_embedding_dim=token_embeddings_dim)
-            c_emb = character_embedding_network(x_char, n_characters=n_chars, char_embedding_dim=char_embeddings_dim)
-            emb = tf.concat([w_emb, c_emb], axis=-1)
+        if not embeddings_onethego:
+            with tf.variable_scope('Embeddings'):
+                w_emb = embedding_layer(x_word, n_tokens=n_tokens, token_embedding_dim=token_embeddings_dim)
+                c_emb = character_embedding_network(x_char, n_characters=n_chars, char_embedding_dim=char_embeddings_dim)
+                emb = tf.concat([w_emb, c_emb], axis=-1)
+        else:
+            emb = x_word
 
         # First convolutional network
         with tf.variable_scope('ConvNet'):
@@ -99,6 +106,7 @@ class NER:
         self._logging = logging
         # Get training op
         self._train_op = self.get_train_op(loss, learning_rate_ph, lr_decay_rate=learning_rate_decay_ph)
+        self._embeddings_onethego = embeddings_onethego
         sess.run(tf.global_variables_initializer())
 
     def save(self, model_file_path=None):
