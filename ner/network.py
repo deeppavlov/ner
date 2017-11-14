@@ -144,8 +144,7 @@ class NER:
         self._dropout = dropout_ph
         self._loss_tensor = loss_tensor
         self._use_dropout = True if embeddings_dropout or dense_dropout else None
-        if pretrained_model_filepath is not None:
-            self.load(pretrained_model_filepath)
+
         self._training_ph = training_ph
         self._logging = logging
         # Get training op
@@ -154,6 +153,8 @@ class NER:
         self._entity_of_interest = entity_of_interest
         self.verbouse = verbouse
         sess.run(tf.global_variables_initializer())
+        if pretrained_model_filepath is not None:
+            self.load(pretrained_model_filepath)
 
     def save(self, model_file_path=None):
         if model_file_path is None:
@@ -304,7 +305,10 @@ class NER:
 
     def get_train_op(self, loss, learning_rate, learnable_scopes=None, lr_decay_rate=None):
         global_step = tf.Variable(0, trainable=False)
-        n_training_samples = len(self.corpus.dataset['train'])
+        try:
+            n_training_samples = len(self.corpus.dataset['train'])
+        except TypeError:
+            n_training_samples = 1024
         batch_size = tf.shape(self._x_w)[0]
         decay_steps = tf.cast(n_training_samples / batch_size, tf.int32)
         if lr_decay_rate is not None:

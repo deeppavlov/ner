@@ -30,14 +30,14 @@ class Vocabulary:
             # in SPECIAL_TOKENS
             default_ind = special_tokens.index('<UNK>')
             self._t2i = defaultdict(lambda: default_ind)
-        self._i2t = dict()
+        self._i2t = list()
         self.frequencies = Counter()
 
         self.counter = 0
         for token in special_tokens:
             self._t2i[token] = self.counter
             self.frequencies[token] += 0
-            self._i2t[self.counter] = token
+            self._i2t.append(token)
             self.counter += 1
         if tokens is not None:
             self.update_dict(tokens)
@@ -46,7 +46,7 @@ class Vocabulary:
         for token in tokens:
             if token not in self._t2i:
                 self._t2i[token] = self.counter
-                self._i2t[self.counter] = token
+                self._i2t.append(token)
                 self.counter += 1
             self.frequencies[token] += 1
 
