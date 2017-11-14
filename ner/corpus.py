@@ -108,8 +108,7 @@ class Corpus:
         else:
             self.embeddings = None
 
-            # All tokens for dictionary building
-
+    # All tokens for dictionary building
     def get_tokens(self, data_type='train'):
         for tokens, _ in self.dataset[data_type]:
             for token in tokens:
@@ -221,7 +220,10 @@ class Corpus:
         # Prepare x batch
         for n, utterance in enumerate(batch_x):
             if prepare_embeddings_onthego:
-                x_token[n, :len(utterance), :] = [self.embeddings[token] for token in utterance]
+                try:
+                    x_token[n, :len(utterance), :] = [self.embeddings[token] for token in utterance]
+                except KeyError:
+                    pass
             else:
                 x_token[n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
             if return_char:

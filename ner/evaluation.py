@@ -26,7 +26,7 @@ def chunk_finder(current_token, previous_token, tag):
     return create_chunk, pop_out
 
 
-def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
+def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False, entity_of_interest=None):
     # Find all tags
     tags = set()
     for tag in y_true + y_pred:
@@ -38,6 +38,7 @@ def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
     results = OrderedDict()
     for tag in tags:
         results[tag] = OrderedDict()
+    results['__total__'] = OrderedDict()
     n_tokens = len(y_true)
     total_correct = 0
     # Firstly we find all chunks in the ground truth and prediction
@@ -113,6 +114,8 @@ def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
     total_recall = 0
     total_f1 = 0
     for tag in results:
+        if tag == '__total__':
+            continue
         n_pred = results[tag]['n_predicted_entities']
         n_true = results[tag]['n_true_entities']
         total_true_entities += n_true
@@ -135,6 +138,13 @@ def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
         total_f1 = 2 * total_precision * total_recall / (total_precision + total_recall)
     else:
         total_f1 = 0
+
+    results['__total__']['n_predicted_entities'] = total_predicted_entities
+    results['__total__']['n_true_entities'] = total_true_entities
+    results['__total__']['precision'] = total_precision
+    results['__total__']['recall'] = total_recall
+    results['__total__']['f1'] = total_f1
+
     if print_results:
         s = 'processed {len} tokens ' \
             'with {tot_true} phrases; ' \
@@ -150,14 +160,33 @@ def precision_recall_f1(y_true, y_pred, print_results=True, short_report=False):
                                              tot_prec=total_precision,
                                              tot_recall=total_recall,
                                              tot_f1=total_f1)
+
         if not short_report:
             for tag in tags:
-                s += '\t' + tag + ': precision:  {tot_prec:.2f}%; ' \
-                                  'recall:  {tot_recall:.2f}%; ' \
-                                  'FB1:  {tot_f1:.2f} ' \
-                                  '{tot_predicted}\n\n'.format(tot_prec=results[tag]['precision'],
-                                                               tot_recall=results[tag]['recall'],
-                                                               tot_f1=results[tag]['f1'],
-                                                               tot_predicted=results[tag]['n_predicted_entities'])
+                if entity_of_interest is not None:
+                    if entity_of_interest in tag:
+                        s += '\t' + tag + ': precision:  {tot_prec:.2f}%; ' \
+                                          'recall:  {tot_recall:.2f}%; ' \
+                                          'F1:  {tot_f1:.2f} ' \
+                                          '{tot_predicted}\n\n'.format(tot_prec=results[tag]['precision'],
+                                                                       tot_recall=results[tag]['recall'],
+                                                                       tot_f1=results[tag]['f1'],
+                                                                       tot_predicted=results[tag]['n_predicted_entities'])
+                elif tag != '__total__':
+                    s += '\t' + tag + ': precision:  {tot_prec:.2f}%; ' \
+                                      'recall:  {tot_recall:.2f}%; ' \
+                                      'F1:  {tot_f1:.2f} ' \
+                                      '{tot_predicted}\n\n'.format(tot_prec=results[tag]['precision'],
+                                                                   tot_recall=results[tag]['recall'],
+                                                                   tot_f1=results[tag]['f1'],
+                                                                   tot_predicted=results[tag]['n_predicted_entities'])
+        elif entity_of_interest is not None:
+            s += '\t' + entity_of_interest + ': precision:  {tot_prec:.2f}%; ' \
+                              'recall:  {tot_recall:.2f}%; ' \
+                              'F1:  {tot_f1:.2f} ' \
+                              '{tot_predicted}\n\n'.format(tot_prec=results[entity_of_interest]['precision'],
+                                                           tot_recall=results[entity_of_interest]['recall'],
+                                                           tot_f1=results[entity_of_interest]['f1'],
+                                                           tot_predicted=results[entity_of_interest]['n_predicted_entities'])
         print(s)
     return results

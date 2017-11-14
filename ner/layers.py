@@ -1,11 +1,11 @@
 import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 import numpy as np
+import collections
 
 
 def stacked_convolutions(input_units,
-                         n_filters=None,
-                         n_layers=1,
+                         n_filters,
                          filter_width=3,
                          use_batch_norm=False,
                          use_dilation=False,
@@ -15,13 +15,20 @@ def stacked_convolutions(input_units,
         # If number of filters is not given the number of filters
         # will be equal to the number of input features
         n_filters = input_units.get_shape().as_list()[-1]
+    # if isinstance(n_filters, collections.Iterable) and n_layers is not None:
+    #     assert len(n_filters) == n_layers
+    n_layers = len(n_filters)
     for n_layer in range(n_layers):
+        if isinstance(n_filters, collections.Iterable):
+            current_n_fileters = n_filters[n_layer]
+        else:
+            current_n_fileters = n_filters
         if use_dilation:
             dilation_rate = 2**n_layer
         else:
             dilation_rate = 1
         units = tf.layers.conv1d(units,
-                                 n_filters,
+                                 current_n_fileters,
                                  filter_width,
                                  padding='same',
                                  dilation_rate=dilation_rate,
@@ -62,6 +69,38 @@ def dense_convolutional_network(input_units,
             units = tf.layers.batch_normalization(units, training=training_ph)
         units = tf.nn.relu(units)
         units_list.append(units)
+    return units
+
+
+def stacked_rnn(input_units,
+                n_hidden_list,
+                cell_type='gru'):
+    units = input_units
+    for n_h in n_hidden_list:
+        if cell_type == 'gru':
+            forward_cell = tf.nn.rnn_cell.GRUCell(n_h)
+            backward_cell = tf.nn.rnn_cell.GRUCell(n_h)
+        elif cell_type == 'lstm':
+            forward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
+            backward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
+        else:
+            raise RuntimeError('cell_type must be either gru or lstm')
+
+        # froward_cell_drop_out = tf.nn.rnn_cell.DropoutWrapper(forward_cell,
+        #                                                       state_keep_prob=dropout_ph)
+        # backward_cell = tf.nn.rnn_cell.DropoutWrapper(backward_cell,
+        #                                               state_keep_prob=dropout_ph)
+        # Recurrent network
+        # Input shape -> Output shape
+        # [batch_size, time_steps, embedding_dim] -> [batch_size, time_steps, n_hidden_rnn]
+        (rnn_output_fw, rnn_output_bw), _ = \
+            tf.nn.bidirectional_dynamic_rnn(forward_cell,
+                                            backward_cell,
+                                            units,
+                                            dtype=tf.float32)
+
+        # Dense layer on the top
+        units = tf.concat([rnn_output_fw, rnn_output_bw], axis=2)
     return units
 
 
@@ -108,8 +147,7 @@ def u_shape(input_units,
 
 
 def highway_convolutional_network(input_units,
-                                  n_filters=None,
-                                  n_layers=1,
+                                  n_filters,
                                   filter_width=3,
                                   use_batch_norm=False,
                                   use_dilation=False,
@@ -118,13 +156,13 @@ def highway_convolutional_network(input_units,
         # If number of filters is not given the number of filters
         # will be equal to the number of input features
         n_filters = input_units.get_shape().as_list()[-1]
-    for n_layer in range(n_layers):
+    for n_layer, n_filt in enumerate(n_filters):
         if use_dilation:
             dilation_rate = 2**n_layer
         else:
             dilation_rate = 1
         units = tf.layers.conv1d(input_units,
-                                 n_filters,
+                                 n_filt,
                                  filter_width,
                                  padding='same',
                                  dilation_rate=dilation_rate,
@@ -132,7 +170,7 @@ def highway_convolutional_network(input_units,
         if use_batch_norm:
             units = tf.layers.batch_normalization(units, training=training_ph)
         sigmoid_gate = tf.layers.dense(input_units, activation=tf.sigmoid, kernel_initializer=xavier_initializer())
-        input_units = sigmoid_gate * input_units + (1 - input_units) * units
+        input_units = sigmoid_gate * input_units + (1 - sigmoid_gate) * units
         input_units = tf.nn.relu(input_units)
     return input_units
 
@@ -156,7 +194,7 @@ def embedding_layer(input_placeholder=None,
     return embeddings
 
 
-def character_embedding_network(char_placeholder, n_characters, char_embedding_dim, filter_width=3):
+def character_embedding_network(char_placeholder, n_characters, char_embedding_dim, filter_width=7):
     char_emb_mat = np.random.randn(n_characters, char_embedding_dim).astype(np.float32) / np.sqrt(char_embedding_dim)
     char_emb_var = tf.Variable(char_emb_mat, trainable=True)
     with tf.variable_scope('Char_Emb_Network'):

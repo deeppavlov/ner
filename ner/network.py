@@ -1,12 +1,14 @@
 import os
 from collections import defaultdict
-
 import numpy as np
 import tensorflow as tf
 from .layers import character_embedding_network
 from .layers import embedding_layer
 from .layers import stacked_convolutions
+from .layers import highway_convolutional_network
+from .layers import stacked_rnn
 from tensorflow.contrib.layers import xavier_initializer
+
 
 from .corpus import Corpus
 from .evaluation import precision_recall_f1
@@ -20,16 +22,21 @@ MODEL_FILE_NAME = 'ner_model.ckpt'
 class NER:
     def __init__(self,
                  corpus,
-                 n_conv_layers=3,
-                 n_filters=100,
+                 n_filters=(128, 256),
                  filter_width=3,
-                 token_embeddings_dim=100,
-                 char_embeddings_dim=25,
+                 token_embeddings_dim=128,
+                 char_embeddings_dim=50,
+                 use_char_embeddins=True,
                  pretrained_model_filepath=None,
                  embeddings_dropout=False,
                  dense_dropout=False,
                  use_batch_norm=False,
-                 logging=False):
+                 logging=False,
+                 entity_of_interest=None,
+                 use_crf=False,
+                 net_type='cnn',
+                 char_filter_width=5,
+                 verbouse=True):
         tf.reset_default_graph()
 
         n_tags = len(corpus.tag_dict)
@@ -38,12 +45,14 @@ class NER:
         embeddings_onethego = corpus.embeddings is not None and not isinstance(corpus.embeddings, dict)
 
         # Create placeholders
+        # noinspection PyPackageRequirements
         if embeddings_onethego:
             x_word = tf.placeholder(dtype=tf.float32, shape=[None, None, corpus.embeddings.vector_size], name='x_word')
         else:
             x_word = tf.placeholder(dtype=tf.int32, shape=[None, None], name='x_word')
         x_char = tf.placeholder(dtype=tf.int32, shape=[None, None, None], name='x_char')
         y_true = tf.placeholder(dtype=tf.int32, shape=[None, None], name='y_tag')
+
         # Auxiliary placeholders
         learning_rate_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
         dropout_ph = tf.placeholder_with_default(1.0, shape=[])
@@ -54,45 +63,80 @@ class NER:
         if not embeddings_onethego:
             with tf.variable_scope('Embeddings'):
                 w_emb = embedding_layer(x_word, n_tokens=n_tokens, token_embedding_dim=token_embeddings_dim)
-                c_emb = character_embedding_network(x_char, n_characters=n_chars, char_embedding_dim=char_embeddings_dim)
-                emb = tf.concat([w_emb, c_emb], axis=-1)
+                if use_char_embeddins:
+                    c_emb = character_embedding_network(x_char,
+                                                        n_characters=n_chars,
+                                                        char_embedding_dim=char_embeddings_dim,
+                                                        filter_width=char_filter_width)
+                    emb = tf.concat([w_emb, c_emb], axis=-1)
+                else:
+                    emb = w_emb
         else:
             emb = x_word
 
-        # First convolutional network
-        with tf.variable_scope('ConvNet'):
-            units = stacked_convolutions(emb,
-                                         n_filters=n_filters,
-                                         n_layers=n_conv_layers,
-                                         filter_width=filter_width,
-                                         use_batch_norm=use_batch_norm,
-                                         training_ph=training_ph)
+        # Dropout for embeddings
+        if embeddings_dropout:
+            emb = tf.layers.dropout(emb, dropout_ph, training=training_ph)
 
+        if 'cnn' in net_type.lower():
+            # Convolutional network
+            with tf.variable_scope('ConvNet'):
+                units = stacked_convolutions(emb,
+                                             n_filters=n_filters,
+                                             filter_width=filter_width,
+                                             use_batch_norm=use_batch_norm,
+                                             training_ph=training_ph)
+        elif 'rnn' in net_type.lower():
+            units = stacked_rnn(emb, n_filters, cell_type='lstm')
+
+        elif 'cnn_highway' in net_type.lower():
+                units = highway_convolutional_network(emb,
+                                                      n_filters=n_filters,
+                                                      filter_width=filter_width,
+                                                      use_batch_norm=use_batch_norm,
+                                                      training_ph=training_ph)
+        else:
+            raise KeyError('There is no such type of network: {}'.format(net_type))
         # Classifier
         with tf.variable_scope('Classifier'):
-            units = tf.layers.dense(units, n_filters, kernel_initializer=xavier_initializer())
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
-            predictions = tf.argmax(logits, axis=-1)
 
         # Loss with masking
-        ground_truth_labels = tf.one_hot(y_true, n_tags)
-        loss_tensor = tf.nn.softmax_cross_entropy_with_logits(labels=ground_truth_labels, logits=logits)
-        loss_tensor = loss_tensor * tf.cast(tf.not_equal(x_word, corpus.token_dict.tok2idx('<PAD>')), tf.float32)
-        loss = tf.reduce_mean(loss_tensor)
+        mask = tf.cast(tf.not_equal(x_word, corpus.token_dict.tok2idx('<PAD>')), tf.float32)
 
+        if use_crf:
+            sequence_lengths = tf.reduce_sum(mask, axis=1)
+            log_likelihood, trainsition_params = tf.contrib.crf.crf_log_likelihood(logits,
+                                                                                y_true,
+                                                                                sequence_lengths)
+            loss_tensor = -log_likelihood
+            predictions = None
+        else:
+            ground_truth_labels = tf.one_hot(y_true, n_tags)
+            loss_tensor = tf.nn.softmax_cross_entropy_with_logits(labels=ground_truth_labels, logits=logits)
+            loss_tensor = loss_tensor * mask
+            predictions = tf.argmax(logits, axis=-1)
+
+
+        loss = tf.reduce_mean(loss_tensor)
         # Initialize session
         sess = tf.Session()
-
-        self.print_number_of_parameters()
+        if verbouse:
+            self.print_number_of_parameters()
         if logging:
             self.train_writer = tf.summary.FileWriter('summary', sess.graph)
 
+        self._use_crf = use_crf
         self.summary = tf.summary.merge_all()
         self._learning_rate_decay_ph = learning_rate_decay_ph
         self._x_w = x_word
         self._x_c = x_char
         self._y_true = y_true
         self._y_pred = predictions
+        if use_crf:
+            self._logits = logits
+            self._trainsition_params = trainsition_params
+            self._sequence_lengths = sequence_lengths
         self._loss = loss
         self._sess = sess
         self.corpus = corpus
@@ -107,6 +151,8 @@ class NER:
         # Get training op
         self._train_op = self.get_train_op(loss, learning_rate_ph, lr_decay_rate=learning_rate_decay_ph)
         self._embeddings_onethego = embeddings_onethego
+        self._entity_of_interest = entity_of_interest
+        self.verbouse = verbouse
         sess.run(tf.global_variables_initializer())
 
     def save(self, model_file_path=None):
@@ -142,10 +188,12 @@ class NER:
     def fit(self, batch_gen=None, batch_size=32, learning_rate=1e-3, epochs=1, dropout_rate=0.5, learning_rate_decay=1):
         for epoch in range(epochs):
             count = 0
-            print('Epoch {}'.format(epoch))
+            if self.verbouse:
+                print('Epoch {}'.format(epoch))
             if batch_gen is None:
                 batch_generator = self.corpus.batch_generator(batch_size, dataset_type='train')
             for (x_word, x_char), y_tag in batch_generator:
+
                 feed_dict = self._fill_feed_dict(x_word,
                                                  x_char,
                                                  y_tag,
@@ -159,19 +207,35 @@ class NER:
 
                 self._sess.run(self._train_op, feed_dict=feed_dict)
                 count += len(x_word)
-
-            # DEBUG
-            print('Learning rate: ', self._sess.run(self._learning_rate_decayed, feed_dict))
-
-            self.eval_conll('valid', print_results=True, short_report=True)
+            if self.verbouse:
+                self.eval_conll('valid', print_results=True)
             self.save()
-        self.eval_conll(dataset_type='train', short_report=False)
-        self.eval_conll(dataset_type='valid', short_report=False)
-        self.eval_conll(dataset_type='test', short_report=False)
+
+        if self.verbouse:
+            self.eval_conll(dataset_type='train', short_report=False)
+            self.eval_conll(dataset_type='valid', short_report=False)
+            results = self.eval_conll(dataset_type='test', short_report=False)
+        else:
+            results = self.eval_conll(dataset_type='test', short_report=True)
+        return results
 
     def predict(self, x_word, x_char):
         feed_dict = self._fill_feed_dict(x_word, x_char, training=False)
-        y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
+        if self._use_crf:
+            y_pred = []
+            logits, trans_params, sequence_lengths = self._sess.run([self._logits,
+                                                                     self._trainsition_params,
+                                                                     self._sequence_lengths
+                                                                     ],
+                                                                    feed_dict=feed_dict)
+
+            # iterate over the sentences because no batching in vitervi_decode
+            for logit, sequence_length in zip(logits, sequence_lengths):
+                logit = logit[:int(sequence_length)]  # keep only the valid steps
+                viterbi_seq, viterbi_score = tf.contrib.crf.viterbi_decode(logit, trans_params)
+                y_pred += [viterbi_seq]
+        else:
+            y_pred = self._sess.run(self._y_pred, feed_dict=feed_dict)
         return self.corpus.tag_dict.batch_idxs2batch_toks(y_pred, filter_paddings=True)
 
     def eval_conll(self, dataset_type='test', print_results=True, short_report=True):
@@ -187,7 +251,11 @@ class NER:
                     y_pred_list.append(tag_predicted)
                 y_true_list.append('O')
                 y_pred_list.append('O')
-        return precision_recall_f1(y_true_list, y_pred_list, print_results, short_report)
+        return precision_recall_f1(y_true_list,
+                                   y_pred_list,
+                                   print_results,
+                                   short_report,
+                                   entity_of_interest=self._entity_of_interest)
 
     def _fill_feed_dict(self,
                         x_w,
@@ -257,8 +325,7 @@ class NER:
     def predict_for_token_batch(self, tokens_batch):
         (batch_tok, batch_char), _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
         # Prediction indices
-        pred_idxs = self._sess.run(self._y_pred, feed_dict={self._x_w: batch_tok, self._x_c: batch_char})
-        predictions_batch = self.corpus.tag_dict.batch_idxs2batch_toks(pred_idxs, filter_paddings=True)
+        predictions_batch = self.predict(batch_tok, batch_char)
         predictions_batch_no_pad = list()
         for n, predicted_tags in enumerate(predictions_batch):
             predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
@@ -267,12 +334,14 @@ class NER:
 
 if __name__ == '__main__':
     corp = Corpus(dicts_filepath='dict.txt')
+
     parameters = {'n_conv_layers': 2,
                   'n_filters': 100,
                   'filter_width': 5,
                   'token_embeddings_dim': 100,
                   'char_embeddings_dim': 25,
-                  'use_batch_norm': False}
+                  'use_batch_norm': False,
+                  'use_crf': True}
 
     # Creating a convolutional NER model
     ner = NER(corp, **parameters)
