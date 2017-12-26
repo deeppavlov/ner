@@ -2,6 +2,7 @@ import os
 import requests
 from tqdm import tqdm
 import tarfile
+import hashlib
 
 
 def download(dest_file_path, source_url):
@@ -40,7 +41,7 @@ def untar(file_path, extract_folder=None):
 
 
 def download_untar(url, download_path, extract_path=None):
-    r"""Download an archive from http link end extract it"""
+    r"""Download an archive from http link, extract it and then delete the archive"""
     file_name = url.split('/')[-1]
     if extract_path is None:
         extract_path = download_path
@@ -49,3 +50,12 @@ def download_untar(url, download_path, extract_path=None):
     download(tar_file_path, url)
     untar(tar_file_path, extract_path)
     os.remove(tar_file_path)
+
+
+def md5_hashsum(file_names):
+    hash_md5 = hashlib.md5()
+    for file_name in file_names:
+        with open(file_name, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+    return hash_md5.hexdigest()
