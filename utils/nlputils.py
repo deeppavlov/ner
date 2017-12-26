@@ -41,6 +41,7 @@ def split_sentences(tokens, tags=None):
             else:
                 tmp_tokens.append(token)
                 tmp_tags.append(tag)
+            prev_token = token
         if len(tmp_tokens) > 0:
             utterances.append(tmp_tokens)
             utterances_tags.append(tmp_tags)
@@ -56,3 +57,30 @@ def split_sentences(tokens, tags=None):
         if len(tmp_tokens) > 0:
             utterances.append(tmp_tokens)
         return utterances
+
+
+def get_list_of_us_geo_objects(geo_file='/home/mikhail/Data/us.csv', countries_file='/home/mikhail/Data/countries.txt'):
+    states = set()
+    cities = set()
+    states_short = set()
+    with open(geo_file) as f:
+        for line in f:
+            items = line.split(',')
+            if len(items) == 10:
+                cities.add(items[2])
+                states.add(items[3])
+                states_short.add(items[4])
+
+    countries = set()
+    with open(countries_file) as f:
+        for line in f:
+            countries.add(line.strip())
+    return states, cities, states_short, countries
+
+
+def get_list_of_countries(country_file='/home/mikhail/Data/countries.txt'):
+    with open(country_file) as f:
+        country_list = list()
+        for line in f:
+            country_list.append(line.strip())
+    return country_list
