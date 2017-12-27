@@ -361,9 +361,9 @@ class NER:
         return train_op
 
     def predict_for_token_batch(self, tokens_batch):
-        (batch_tok, batch_char), _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
+        batch_x, _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
         # Prediction indices
-        predictions_batch = self.predict(batch_tok, batch_char)
+        predictions_batch = self.predict(batch_x)
         predictions_batch_no_pad = list()
         for n, predicted_tags in enumerate(predictions_batch):
             predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
