@@ -2,7 +2,9 @@ from collections import Counter
 from collections import defaultdict
 import random
 import numpy as np
-from utils.nlputils import get_list_of_us_geo_objects
+
+
+
 
 DATA_PATH = '/tmp/ner'
 DOC_START_STRING = '-DOCSTART-'
@@ -63,6 +65,7 @@ class Vocabulary:
     def tok2idx(self, tok):
         return self._t2i[tok]
 
+
     def toks2idxs(self, toks):
         return [self._t2i[tok] for tok in toks]
 
@@ -102,7 +105,6 @@ class Corpus:
         elif dicts_filepath is not None:
             self.dataset = None
             self.load_corpus_dicts(dicts_filepath)
-        self._geo_gazetteers = get_list_of_us_geo_objects()
         if embeddings_file_path is not None:
             self.embeddings = self.load_embeddings(embeddings_file_path)
         else:
@@ -139,21 +141,8 @@ class Corpus:
             from gensim.models.wrappers import FastText
             embeddings = FastText.load_fasttext_format(file_path)
         else:
-            pre_trained_embeddins_dict = dict()
-            with open(file_path) as f:
-                _ = f.readline()
-                for line in f:
-                    token, *embedding = line.split()
-                    embedding = np.array([float(val_str) for val_str in embedding])
-                    if token in self.token_dict:
-                        pre_trained_embeddins_dict[token] = embedding
-            print('Readed')
-            pre_trained_std = np.std(list(pre_trained_embeddins_dict.values()))
-            embeddings = pre_trained_std * np.random.randn(len(self.token_dict), len(embedding))
-            for idx in range(len(self.token_dict)):
-                token = self.token_dict.idx2tok(idx)
-                if token in pre_trained_embeddins_dict:
-                    embeddings[idx] = pre_trained_embeddins_dict[token]
+            from gensim.models import KeyedVectors
+            embeddings = KeyedVectors.load_word2vec_format(file_path)
         return embeddings
 
     def tokens_to_x_and_xc(self, tokens):
@@ -201,7 +190,7 @@ class Corpus:
         max_token_len = max([len(token) for utt in batch_x for token in utt])
 
         # Check whether bin file is used (if so then embeddings will be prepared on the go using gensim)
-        prepare_embeddings_onthego = self.embeddings is not None and not isinstance(self.embeddings, dict)
+        prepare_embeddings_onthego = self.embeddings is not None
         # Prepare numpy arrays
         if prepare_embeddings_onthego:  # If the embeddings is a fastText model
             x['emb'] = np.zeros([batch_size, max_utt_len, self.embeddings.vector_size], dtype=np.float32)
@@ -214,24 +203,16 @@ class Corpus:
         for n, utt in enumerate(batch_x):
             x['capitalization'][n, :len(utt)] = [tok[0].isupper() for tok in utt]
 
-        # Geo gazetteers features
-        x['geo'] = np.zeros([batch_size, max_utt_len, len(self._geo_gazetteers)], dtype=np.float32)
-        # for n, utt in enumerate(batch_x):
-        #     for q, gazetteer in enumerate(self._geo_gazetteers):
-        #         for gazetteer_val in gazetteer:
-        #             items = gazetteer_val.split()
-        #             n_i = len(items)
-        #             for k in range(len(utt) - len(items) + 1):
-        #                 if utt[k: k + n_i] == items:
-        #                     x['geo'][n, k: k + n_i, q] = 1.0
-
         # Prepare x batch
         for n, utterance in enumerate(batch_x):
             if prepare_embeddings_onthego:
-                try:
-                    x['emb'][n, :len(utterance), :] = [self.embeddings[token] for token in utterance]
-                except KeyError:
-                    pass
+                utterance_vectors = np.zeros([len(utterance), self.embeddings.vector_size])
+                for q, token in enumerate(utterance):
+                    try:
+                        utterance_vectors[q] = self.embeddings[token.lower()]
+                    except KeyError:
+                        pass
+                x['emb'][n, :len(utterance), :] = utterance_vectors
             x['token'][n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
             for k, token in enumerate(utterance):
                 x['char'][n, k, :len(token)] = self.char_dict.toks2idxs(token)
@@ -309,13 +290,3 @@ class Corpus:
                 if len(line) > 0:
                     chars.append(line)
             self.char_dict = Vocabulary(chars)
-
-
-if __name__ == '__main__':
-    from data_tools import snips_reader, dataset_slicer
-    xy_list = snips_reader()
-    dataset = dataset_slicer(xy_list)
-    corp = Corpus(dataset)
-    # Check batching
-    batch_size = 2
-    (x, xc), y = corp.batch_generator(batch_size, dataset_type='test').__next__()
