@@ -37,7 +37,6 @@ class NER:
                  char_filter_width=5,
                  verbouse=True,
                  use_capitalization=False,
-                 use_geo_gazetteers=False,
                  concat_embeddings=False):
         tf.reset_default_graph()
 
@@ -49,7 +48,6 @@ class NER:
                               not isinstance(corpus.embeddings, dict)
 
         # Create placeholders
-        # noinspection PyPackageRequirements
         if embeddings_onethego:
             x_word = tf.placeholder(dtype=tf.float32, shape=[None, None, corpus.embeddings.vector_size], name='x_word')
         else:
@@ -60,7 +58,6 @@ class NER:
         y_true = tf.placeholder(dtype=tf.int32, shape=[None, None], name='y_tag')
         mask = tf.placeholder(dtype=tf.float32, shape=[None, None], name='mask')
         x_capi = tf.placeholder(dtype=tf.float32, shape=[None, None], name='x_capi')
-        x_geo = tf.placeholder(dtype=tf.float32, shape=[None, None, len(corpus._geo_gazetteers)], name='x_geo')
 
         # Auxiliary placeholders
         learning_rate_ph = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
@@ -90,8 +87,6 @@ class NER:
             cap = tf.expand_dims(x_capi, 2)
             emb = tf.concat([emb, cap], axis=2)
 
-        if use_geo_gazetteers:
-            emb = tf.concat([emb, x_geo], axis=2)
 
         # Dropout for embeddings
         if embeddings_dropout:
@@ -118,8 +113,6 @@ class NER:
             raise KeyError('There is no such type of network: {}'.format(net_type))
 
         # Classifier
-        if use_geo_gazetteers:
-            units = tf.concat([units, x_geo], axis=-1)
         with tf.variable_scope('Classifier'):
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
 
@@ -181,9 +174,7 @@ class NER:
         if use_capitalization:
             self._x_capi = x_capi
         self._use_capitalization = use_capitalization
-        self._use_geo_gazetteers = use_geo_gazetteers
         self._concat_embeddings = concat_embeddings
-        self._x_geo = x_geo
         if pretrained_model_filepath is not None:
             self.load(pretrained_model_filepath)
 
@@ -307,9 +298,6 @@ class NER:
         # Optional arguments
         if self._use_capitalization:
             feed_dict[self._x_capi] = x['capitalization']
-
-        if self._use_geo_gazetteers:
-            feed_dict[self._x_geo] = x['geo']
 
         if self._concat_embeddings:
             feed_dict[self._x_emb] = x['emb']
