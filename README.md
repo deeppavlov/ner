@@ -28,9 +28,28 @@ The F1 measure for presented model along with other published solution provided 
 
 ### Usage
 
+The toolkit is implemented in Python 3 and requires a number of packages. To install all needed packages use:
+
+    $ pip3 install -r requirements.txt
+
+Warning: there is no GPU version of TensorFlow specified in the requirements file
+
 The simples way to use pre-trained Russian NER model is via command line interface:
 
     $ echo "На конспирологическом саммите в США глава Федерального Бюро Расследований сделал невероятное заявление" | ./ner.py
+
+    На O
+    конспирологическом O
+    саммите O
+    в O
+    США B-LOC
+    глава O
+    Федерального B-ORG
+    Бюро I-ORG
+    Расследований I-ORG
+    сделал O
+    невероятное O
+    заявление O
 
 And for interactive usage simply type:
 
