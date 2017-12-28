@@ -19,13 +19,22 @@ The F1 measure for presented model along with other published solution provided 
 |---------------------- |:----------------:|:------------:|:---------------:|
 | Gareev et al. [1]     | 75.05            |              |                 |
 | Malykh et al. [4]     | 62.49            |              |                 |
-| Trofimov  [5]         | 95.57            |              |                 |
+| Trofimov  [5]         |                  | 95.57        |                 |
 | Rubaylo et al. [6]    |                  |              | 78.13           |
 | Sysoev et al. [7]     |                  |              | 74.67           |
 | Ivanitsky et al.  [7] |                  |              | **87.88**       |
 | Mozharova et al.  [8] |                  | 97.21        |                 |
 | Our (Bi-LSTM+CRF)     | **87.17**        | **99.26**    | 82.10           ||
 
+### Usage
+
+The simples way to use pre-trained Russian NER model is via command line interface:
+
+    $ echo "На конспирологическом саммите в США глава Федерального Бюро Расследований сделал невероятное заявление" | ./ner.py
+
+And for interactive usage simply type:
+
+    $ ./ner.py
 
 [1] - Rinat Gareev, Maksim Tkachenko, Valery Solovyev, Andrey Simanovsky, Vladimir Ivanov: Introducing Baselines for Russian Named Entity Recognition. Computational Linguistics and Intelligent Text Processing, 329 -- 342 (2013).
 
@@ -33,10 +42,7 @@ The F1 measure for presented model along with other published solution provided 
 
 [3] - http://ai-center.botik.ru/Airec/index.php/ru/collections/28-persons-1000
 
-[4] -  Reproducing Russian NER Baseline Quality without Additional Data. In proceedings of the 3rd Internationa
-l Workshop on Concept
-Discovery in Unstructured Data, Moscow, Russia, 54 – 59 (201
-6)
+[4] -  Reproducing Russian NER Baseline Quality without Additional Data. In proceedings of the 3rd International Workshop on ConceptDiscovery in Unstructured Data, Moscow, Russia, 54 – 59 (2016)
 
 [5] - Rubaylo A. V., Kosenko M. Y.: Software utilities for natural language information
 retrievial. Almanac of modern science and education, Volume 12 (114), 87 – 92.(2016)
