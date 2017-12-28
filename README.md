@@ -1,9 +1,6 @@
 # Neural Networks for Named Entity Recognition
 
-In this repo you can find several neural network architectures for named entity recognition. Architectures provided
-by this repo are for based on the paper "_Application of a Hybrid Bi-LSTM-CRF model to
-the task of Russian Named Entity Recognition_" https://arxiv.org/pdf/1709.09686.pdf.
-
+In this repo you can find several neural network architectures for named entity recognition from the paper "_Application of a Hybrid Bi-LSTM-CRF model to the task of Russian Named Entity Recognition_" https://arxiv.org/pdf/1709.09686.pdf.
 
 NER class from ner/network.py provides methods for construction, training and inference neural networks for Named Entity Recognition.
 
@@ -12,7 +9,6 @@ An example of implementation of Convolutional Neural Network for Russian Named E
 - Gareev corpus [1] (obtainable by request to authors)
 - FactRuEval 2016 [2]
 - Persons-1000 [3]
-
 
 Remark: at training stage the corpora was lemmatized and lowercased.
 So text must be tokenized and lemmatized and lowercased before feeding it into the model.
