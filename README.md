@@ -10,6 +10,12 @@ An example of implementation of Convolutional Neural Network for Russian Named E
 - FactRuEval 2016 [2]
 - Persons-1000 [3]
 
+The pre-trained model can recognize such entities as:
+
+- Persons (PER)
+- Locations (LOC)
+- Organizations (ORG)
+
 Remark: at training stage the corpora were lemmatized and lowercased.
 So text must be tokenized and lemmatized and lowercased before feeding it into the model.
 
