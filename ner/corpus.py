@@ -1,7 +1,22 @@
+"""
+Copyright 2017 Neural Networks and Deep Learning lab, MIPT
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 from collections import Counter
 from collections import defaultdict
 import random
 import numpy as np
+
+
 
 
 DATA_PATH = '/tmp/ner'
@@ -63,6 +78,7 @@ class Vocabulary:
     def tok2idx(self, tok):
         return self._t2i[tok]
 
+
     def toks2idxs(self, toks):
         return [self._t2i[tok] for tok in toks]
 
@@ -102,7 +118,6 @@ class Corpus:
         elif dicts_filepath is not None:
             self.dataset = None
             self.load_corpus_dicts(dicts_filepath)
-
         if embeddings_file_path is not None:
             self.embeddings = self.load_embeddings(embeddings_file_path)
         else:
@@ -139,21 +154,8 @@ class Corpus:
             from gensim.models.wrappers import FastText
             embeddings = FastText.load_fasttext_format(file_path)
         else:
-            pre_trained_embeddins_dict = dict()
-            with open(file_path) as f:
-                _ = f.readline()
-                for line in f:
-                    token, *embedding = line.split()
-                    embedding = np.array([float(val_str) for val_str in embedding])
-                    if token in self.token_dict:
-                        pre_trained_embeddins_dict[token] = embedding
-            print('Readed')
-            pre_trained_std = np.std(list(pre_trained_embeddins_dict.values()))
-            embeddings = pre_trained_std * np.random.randn(len(self.token_dict), len(embedding))
-            for idx in range(len(self.token_dict)):
-                token = self.token_dict.idx2tok(idx)
-                if token in pre_trained_embeddins_dict:
-                    embeddings[idx] = pre_trained_embeddins_dict[token]
+            from gensim.models import KeyedVectors
+            embeddings = KeyedVectors.load_word2vec_format(file_path)
         return embeddings
 
     def tokens_to_x_and_xc(self, tokens):
@@ -175,8 +177,7 @@ class Corpus:
                         batch_size,
                         dataset_type='train',
                         shuffle=True,
-                        allow_smaller_last_batch=True,
-                        return_char=True):
+                        allow_smaller_last_batch=True):
         tokens_tags_pairs = self.dataset[dataset_type]
         n_samples = len(tokens_tags_pairs)
         if shuffle:
@@ -191,51 +192,60 @@ class Corpus:
             batch_end = min((k + 1) * batch_size, n_samples)
             x_batch = [tokens_tags_pairs[ind][0] for ind in order[batch_start: batch_end]]
             y_batch = [tokens_tags_pairs[ind][1] for ind in order[batch_start: batch_end]]
-            (x_token, x_char), y = self.tokens_batch_to_numpy_batch(x_batch, y_batch, return_char)
-            if return_char:
-                yield (x_token, x_char), y
-            else:
-                yield x_token, y
+            x, y = self.tokens_batch_to_numpy_batch(x_batch, y_batch)
+            yield x, y
 
-    def tokens_batch_to_numpy_batch(self, batch_x, batch_y=None, return_char=True):
+    def tokens_batch_to_numpy_batch(self, batch_x, batch_y=None):
+        x = dict()
         # Determine dimensions
         batch_size = len(batch_x)
         max_utt_len = max([len(utt) for utt in batch_x])
         max_token_len = max([len(token) for utt in batch_x for token in utt])
-        prepare_embeddings_onthego = self.embeddings is not None and not isinstance(self.embeddings, dict)
+
+        # Check whether bin file is used (if so then embeddings will be prepared on the go using gensim)
+        prepare_embeddings_onthego = self.embeddings is not None
         # Prepare numpy arrays
         if prepare_embeddings_onthego:  # If the embeddings is a fastText model
-            x_token = np.zeros([batch_size, max_utt_len, self.embeddings.vector_size], dtype=np.float32)
-        else:  # If the embeddings is a token - vector dictionary
-            x_token = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.token_dict['<PAD>']
-        if return_char:
-            x_char = np.ones([batch_size, max_utt_len, max_token_len], dtype=np.int32) * self.char_dict['<PAD>']
-        else:
-            x_char = None
+            x['emb'] = np.zeros([batch_size, max_utt_len, self.embeddings.vector_size], dtype=np.float32)
+
+        x['token'] = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.token_dict['<PAD>']
+        x['char'] = np.ones([batch_size, max_utt_len, max_token_len], dtype=np.int32) * self.char_dict['<PAD>']
+
+        # Capitalization
+        x['capitalization'] = np.zeros([batch_size, max_utt_len], dtype=np.float32)
+        for n, utt in enumerate(batch_x):
+            x['capitalization'][n, :len(utt)] = [tok[0].isupper() for tok in utt]
+
+        # Prepare x batch
+        for n, utterance in enumerate(batch_x):
+            if prepare_embeddings_onthego:
+                utterance_vectors = np.zeros([len(utterance), self.embeddings.vector_size])
+                for q, token in enumerate(utterance):
+                    try:
+                        utterance_vectors[q] = self.embeddings[token.lower()]
+                    except KeyError:
+                        pass
+                x['emb'][n, :len(utterance), :] = utterance_vectors
+            x['token'][n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
+            for k, token in enumerate(utterance):
+                x['char'][n, k, :len(token)] = self.char_dict.toks2idxs(token)
+
+        # Mask for paddings
+        x['mask'] = np.zeros([batch_size, max_utt_len], dtype=np.float32)
+        for n in range(batch_size):
+            x['mask'][n, :len(batch_x[n])] = 1
+
+        # Prepare y batch
         if batch_y is not None:
             y = np.ones([batch_size, max_utt_len], dtype=np.int32) * self.tag_dict['<PAD>']
         else:
             y = None
 
-        # Prepare x batch
-        for n, utterance in enumerate(batch_x):
-            if prepare_embeddings_onthego:
-                try:
-                    x_token[n, :len(utterance), :] = [self.embeddings[token] for token in utterance]
-                except KeyError:
-                    pass
-            else:
-                x_token[n, :len(utterance)] = self.token_dict.toks2idxs(utterance)
-            if return_char:
-                for k, token in enumerate(utterance):
-                    x_char[n, k, :len(token)] = self.char_dict.toks2idxs(token)
-
-        # Prepare y batch
         if batch_y is not None:
             for n, tags in enumerate(batch_y):
                 y[n, :len(tags)] = self.tag_dict.toks2idxs(tags)
 
-        return (x_token, x_char), y
+        return x, y
 
     def save_corpus_dicts(self, filename='dict.txt'):
         # Token dict
@@ -293,10 +303,3 @@ class Corpus:
                 if len(line) > 0:
                     chars.append(line)
             self.char_dict = Vocabulary(chars)
-
-
-if __name__ == '__main__':
-    corp = Corpus()
-    # Check batching
-    batch_size = 2
-    (x, xc), y = corp.batch_generator(batch_size, dataset_type='test').__next__()

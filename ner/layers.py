@@ -1,3 +1,16 @@
+"""
+Copyright 2017 Neural Networks and Deep Learning lab, MIPT
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
 import tensorflow as tf
 from tensorflow.contrib.layers import xavier_initializer
 import numpy as np
@@ -76,31 +89,32 @@ def stacked_rnn(input_units,
                 n_hidden_list,
                 cell_type='gru'):
     units = input_units
-    for n_h in n_hidden_list:
-        if cell_type == 'gru':
-            forward_cell = tf.nn.rnn_cell.GRUCell(n_h)
-            backward_cell = tf.nn.rnn_cell.GRUCell(n_h)
-        elif cell_type == 'lstm':
-            forward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
-            backward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
-        else:
-            raise RuntimeError('cell_type must be either gru or lstm')
+    for n, n_h in enumerate(n_hidden_list):
+        with tf.variable_scope('RNN_layer_' + str(n)):
+            if cell_type == 'gru':
+                forward_cell = tf.nn.rnn_cell.GRUCell(n_h)
+                backward_cell = tf.nn.rnn_cell.GRUCell(n_h)
+            elif cell_type == 'lstm':
+                forward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
+                backward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
+            else:
+                raise RuntimeError('cell_type must be either gru or lstm')
 
-        # froward_cell_drop_out = tf.nn.rnn_cell.DropoutWrapper(forward_cell,
-        #                                                       state_keep_prob=dropout_ph)
-        # backward_cell = tf.nn.rnn_cell.DropoutWrapper(backward_cell,
-        #                                               state_keep_prob=dropout_ph)
-        # Recurrent network
-        # Input shape -> Output shape
-        # [batch_size, time_steps, embedding_dim] -> [batch_size, time_steps, n_hidden_rnn]
-        (rnn_output_fw, rnn_output_bw), _ = \
-            tf.nn.bidirectional_dynamic_rnn(forward_cell,
-                                            backward_cell,
-                                            units,
-                                            dtype=tf.float32)
+            # froward_cell_drop_out = tf.nn.rnn_cell.DropoutWrapper(forward_cell,
+            #                                                       state_keep_prob=dropout_ph)
+            # backward_cell = tf.nn.rnn_cell.DropoutWrapper(backward_cell,
+            #                                               state_keep_prob=dropout_ph)
+            # Recurrent network
+            # Input shape -> Output shape
+            # [batch_size, time_steps, embedding_dim] -> [batch_size, time_steps, n_hidden_rnn]
+            (rnn_output_fw, rnn_output_bw), _ = \
+                tf.nn.bidirectional_dynamic_rnn(forward_cell,
+                                                backward_cell,
+                                                units,
+                                                dtype=tf.float32)
 
-        # Dense layer on the top
-        units = tf.concat([rnn_output_fw, rnn_output_bw], axis=2)
+            # Dense layer on the top
+            units = tf.concat([rnn_output_fw, rnn_output_bw], axis=2)
     return units
 
 
@@ -199,10 +213,10 @@ def character_embedding_network(char_placeholder, n_characters, char_embedding_d
     char_emb_var = tf.Variable(char_emb_mat, trainable=True)
     with tf.variable_scope('Char_Emb_Network'):
         # Character embedding layer
-        c_emb = tf.nn.embedding_lookup(char_emb_mat, char_placeholder)
+        c_emb = tf.nn.embedding_lookup(char_emb_var, char_placeholder)
 
         # Character embedding network
-        char_conv = tf.layers.conv2d(c_emb, char_embedding_dim, (1, filter_width), padding='valid', name='char_conv')
+        char_conv = tf.layers.conv2d(c_emb, char_embedding_dim, (1, filter_width), padding='same', name='char_conv')
         char_emb = tf.reduce_max(char_conv, axis=2)
     return char_emb
 
