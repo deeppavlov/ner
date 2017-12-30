@@ -40,7 +40,7 @@ The toolkit is implemented in Python 3 and requires a number of packages. To ins
 
 Warning: there is no GPU version of TensorFlow specified in the requirements file
 
-The simples way to use pre-trained Russian NER model is via command line interface:
+The simplest way to use pre-trained Russian NER model is via command line interface:
 
     $ echo "На конспирологическом саммите в США глава Федерального Бюро Расследований сделал невероятное заявление" | ./ner.py
 
