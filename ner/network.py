@@ -50,7 +50,8 @@ class NER:
                  char_filter_width=5,
                  verbouse=True,
                  use_capitalization=False,
-                 concat_embeddings=False):
+                 concat_embeddings=False,
+                 cell_type=None):
         tf.reset_default_graph()
 
         n_tags = len(corpus.tag_dict)
@@ -100,7 +101,6 @@ class NER:
             cap = tf.expand_dims(x_capi, 2)
             emb = tf.concat([emb, cap], axis=2)
 
-
         # Dropout for embeddings
         if embeddings_dropout:
             emb = tf.layers.dropout(emb, dropout_ph, training=training_ph)
@@ -114,7 +114,9 @@ class NER:
                                              use_batch_norm=use_batch_norm,
                                              training_ph=training_ph)
         elif 'rnn' in net_type.lower():
-            units = stacked_rnn(emb, n_filters, cell_type='lstm')
+            if cell_type is None or cell_type not in {'lstm', 'gru'}:
+                raise RuntimeError('You must specify the type of the cell! It could be either "lstm" or "gru"')
+            units = stacked_rnn(emb, n_filters, cell_type=cell_type)
 
         elif 'cnn_highway' in net_type.lower():
                 units = highway_convolutional_network(emb,
