@@ -4,7 +4,7 @@ In this repo you can find several neural network architectures for named entity 
 
 NER class from ner/network.py provides methods for construction, training and inference neural networks for Named Entity Recognition.
 
-An example of implementation of Convolutional Neural Network for Russian Named Entity Recognition is provided in example.ipynb. In this example notebook a pre-trained model is used. The model was trained on three datatasets:
+An example of implementation of Convolutional Neural Network for Russian Named Entity Recognition is provided in [example.ipynb](https://github.com/deepmipt/ner/blob/master/example.ipynb). In this example notebook a pre-trained model is used. The model was trained on three datatasets:
 
 - Gareev corpus [1] (obtainable by request to authors)
 - FactRuEval 2016 [2]
@@ -60,6 +60,12 @@ The simplest way to use pre-trained Russian NER model is via command line interf
 And for interactive usage simply type:
 
     $ ./ner.py
+
+### Training
+
+To see how to train the network and what format of data is required see [training_example.ipynb](https://github.com/deepmipt/ner/blob/master/training_example.ipynb) jupyter notebook.
+
+### Literature
 
 [1] - Rinat Gareev, Maksim Tkachenko, Valery Solovyev, Andrey Simanovsky, Vladimir Ivanov: Introducing Baselines for Russian Named Entity Recognition. Computational Linguistics and Intelligent Text Processing, 329 -- 342 (2013).
 
