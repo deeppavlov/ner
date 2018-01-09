@@ -99,14 +99,6 @@ def stacked_rnn(input_units,
                 backward_cell = tf.nn.rnn_cell.LSTMCell(n_h)
             else:
                 raise RuntimeError('cell_type must be either gru or lstm')
-
-            # froward_cell_drop_out = tf.nn.rnn_cell.DropoutWrapper(forward_cell,
-            #                                                       state_keep_prob=dropout_ph)
-            # backward_cell = tf.nn.rnn_cell.DropoutWrapper(backward_cell,
-            #                                               state_keep_prob=dropout_ph)
-            # Recurrent network
-            # Input shape -> Output shape
-            # [batch_size, time_steps, embedding_dim] -> [batch_size, time_steps, n_hidden_rnn]
             (rnn_output_fw, rnn_output_bw), _ = \
                 tf.nn.bidirectional_dynamic_rnn(forward_cell,
                                                 backward_cell,
