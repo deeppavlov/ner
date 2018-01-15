@@ -5,19 +5,24 @@ import itertools
 
 from ner.corpus import Corpus
 from ner.extractor.match import Match
-from ner.extractor.match_type import Type
 from ner.extractor.span import Span
 from ner.network import NER
 from ner.tokenizer import Tokenizer
-from ner.utils import lemmatize
+from ner.utils import lemmatize, download_untar
 
 
 class Extractor:
-    def __init__(self, model_path=None, tokenizer=None):
+    def __init__(self,
+                 model_path=None,
+                 tokenizer=None,
+                 model_url='http://lnsigo.mipt.ru/export/ner/ner_model_total_rus.tar.gz'):
         self.model_path = (
             model_path
             or pkg_resources.resource_filename(__name__, "../model")
         )
+        self.model_url = model_url
+        self._lazy_download()
+
         with open(self._get_path('params.json')) as f:
             self.network_params = json.load(f)
 
@@ -30,6 +35,10 @@ class Extractor:
         )
 
         self.tokenizer = tokenizer or Tokenizer()
+
+    def _lazy_download(self):
+        if not os.listdir(self.model_path):
+            download_untar(self.model_url, self.model_path)
 
     def _get_path(self, filename):
         return os.path.join(self.model_path, filename)
