@@ -3,6 +3,8 @@ import os.path
 import json
 import itertools
 
+import pymorphy2
+
 from ner.corpus import Corpus
 from ner.extractor.match import Match
 from ner.extractor.span import Span
@@ -35,6 +37,7 @@ class Extractor:
         )
 
         self.tokenizer = tokenizer or Tokenizer()
+        self._morph = pymorphy2.MorphAnalyzer()
 
     def _lazy_download(self):
         if not os.path.exists(self.model_path):
@@ -47,7 +50,7 @@ class Extractor:
 
     def __call__(self, text):
         tokens = list(self.tokenizer(text))
-        tokens_lemmas = lemmatize([t.text for t in tokens])
+        tokens_lemmas = lemmatize([t.text for t in tokens], self._morph)
         tags = self.network.predict_for_token_batch([tokens_lemmas])[0]
 
         previous_tag = null_tag = 'O'
