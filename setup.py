@@ -35,10 +35,5 @@ setup(
     ],
     keywords='natural language processing, russian morphology, named entity recognition',
     packages=find_packages(),
-    package_data={
-        'ner': [
-            'model/*',
-        ]
-    },
     install_requires=get_requirements('requirements.txt'),
 )

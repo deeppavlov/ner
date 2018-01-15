@@ -37,6 +37,8 @@ class Extractor:
         self.tokenizer = tokenizer or Tokenizer()
 
     def _lazy_download(self):
+        if not os.path.exists(self.model_path):
+            os.mkdir(self.model_path)
         if not os.listdir(self.model_path):
             download_untar(self.model_url, self.model_path)
 
