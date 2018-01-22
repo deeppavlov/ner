@@ -18,13 +18,14 @@ import tarfile
 import hashlib
 import sys
 import pymorphy2
-import re
+
+from ner.tokenizer import Tokenizer
 
 
 # ------------------------ NLP utils ------------------------------
 
-def lemmatize(words):
-    morph = pymorphy2.MorphAnalyzer()
+def lemmatize(words, morph=None):
+    morph = morph or pymorphy2.MorphAnalyzer()
     if isinstance(words, list):
         words_lemma = list()
         for word in words:
@@ -37,7 +38,7 @@ def lemmatize(words):
 
 
 def tokenize(s):
-    return re.findall(r"[\w]+|[‑–—“”€№…’\"#$%&\'()+,-./:;<>?]", s)
+    return [m.text for m in Tokenizer()(s)]
 
 
 def is_end_of_sentence(prev_token, current_token):
@@ -75,6 +76,7 @@ def split_sentences(tokens, tags=None):
                 tmp_tokens = list()
             else:
                 tmp_tokens.append(token)
+            prev_token = token
         if len(tmp_tokens) > 0:
             utterances.append(tmp_tokens)
         return utterances

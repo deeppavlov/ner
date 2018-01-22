@@ -34,12 +34,21 @@ The F1 measure for presented model along with other published solution provided 
 
 ### Usage
 
+#### Installing
 The toolkit is implemented in Python 3 and requires a number of packages. To install all needed packages use:
+```
+$ pip3 install -r requirements.txt
+```
 
-    $ pip3 install -r requirements.txt
+or
+
+```
+$ pip3 install git+https://github.com/deepmipt/ner
+```
 
 Warning: there is no GPU version of TensorFlow specified in the requirements file
 
+#### Command-Line Interface
 The simplest way to use pre-trained Russian NER model is via command line interface:
 
     $ echo "На конспирологическом саммите в США глава Федерального Бюро Расследований сделал невероятное заявление" | ./ner.py
@@ -60,6 +69,17 @@ The simplest way to use pre-trained Russian NER model is via command line interf
 And for interactive usage simply type:
 
     $ ./ner.py
+
+#### Usage as module
+
+```
+>>> import ner
+>>> extractor = ner.Extractor()
+>>> for m in extractor("На конспирологическом саммите в США глава Федерального Бюро Расследований сделал невероятное заявление"):
+...     print(m)
+Match(tokens=[Token(span=(32, 35), text='США')], span=Span(start=32, end=35), type='LOC')
+Match(tokens=[Token(span=(42, 54), text='Федерального'), Token(span=(55, 59), text='Бюро'), Token(span=(60, 73), text='Расследований')], span=Span(start=42, end=73), type='ORG')
+```
 
 ### Training
 
