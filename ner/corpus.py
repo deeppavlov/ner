@@ -200,6 +200,8 @@ class Corpus:
         # Determine dimensions
         batch_size = len(batch_x)
         max_utt_len = max([len(utt) for utt in batch_x])
+        # Fix batch with len 1 issue (https://github.com/deepmipt/ner/issues/4) 
+        max_utt_len = max(max_utt_len, 2)
         max_token_len = max([len(token) for utt in batch_x for token in utt])
 
         # Check whether bin file is used (if so then embeddings will be prepared on the go using gensim)
