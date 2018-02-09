@@ -252,7 +252,7 @@ class Corpus:
     def save_corpus_dicts(self, filename='dict.txt'):
         # Token dict
         token_dict = self.token_dict._i2t
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding="utf8") as f:
             f.write('-TOKEN-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
@@ -260,7 +260,7 @@ class Corpus:
 
         # Tag dict
         token_dict = self.tag_dict._i2t
-        with open(filename, 'a') as f:
+        with open(filename, 'a', encoding="utf8") as f:
             f.write('-TAG-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
@@ -268,14 +268,14 @@ class Corpus:
 
         # Character dict
         token_dict = self.char_dict._i2t
-        with open(filename, 'a') as f:
+        with open(filename, 'a', encoding="utf8") as f:
             f.write('-CHAR-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
             f.write('\n')
 
     def load_corpus_dicts(self, filename='dict.txt'):
-        with open(filename) as f:
+        with open(filename, encoding="utf8") as f:
             # Token dict
             tokens = list()
             line = f.readline()
