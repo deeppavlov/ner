@@ -27,7 +27,8 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # Check existence of the model by hashsum
-if md5_hashsum(glob('model/*')) != 'f25fe8e1297154077fc4d3bf65ed888e':
+
+if md5_hashsum(sorted(glob('model/*'))) != 'fd50a27b96b24cdabdda13795a3baae7':
     # Download and extract model
     download_url = 'http://lnsigo.mipt.ru/export/models/ner/ner_model_total_rus.tar.gz'
     download_path = 'model/'

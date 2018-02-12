@@ -9,4 +9,4 @@ class Tokenizer:
 
     def __call__(self, text):
         for match in re.finditer(self.token_pattern, text):
-            yield Token(match.span(), match[0])
+            yield Token(match.span(), match.group())
