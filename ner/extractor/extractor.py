@@ -17,7 +17,7 @@ class Extractor:
     def __init__(self,
                  model_path=None,
                  tokenizer=None,
-                 model_url='http://lnsigo.mipt.ru/export/ner/ner_model_total_rus.tar.gz'):
+                 model_url='http://lnsigo.mipt.ru/export/models/ner/ner_model_total_rus.tar.gz'):
         self.model_path = (
             model_path
             or pkg_resources.resource_filename(__name__, "../model")
