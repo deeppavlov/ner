@@ -216,7 +216,9 @@ class Corpus:
         # Capitalization
         x['capitalization'] = np.zeros([batch_size, max_utt_len], dtype=np.float32)
         for n, utt in enumerate(batch_x):
-            x['capitalization'][n, :len(utt)] = [tok[0].isupper() for tok in utt]
+            for k, tok in enumerate(utt):
+                if len(tok) > 0 and tok[0].isupper():
+                    x['capitalization'][n, k] = 1
 
         # Prepare x batch
         for n, utterance in enumerate(batch_x):
