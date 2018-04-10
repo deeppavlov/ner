@@ -51,7 +51,11 @@ class NER:
                  verbouse=True,
                  use_capitalization=False,
                  concat_embeddings=False,
-                 cell_type=None):
+                 cell_type=None,
+                 two_dense_layers=True,
+                 use_focal_loss=False,
+                 l2_beta=0,
+                 gpu=0):
         tf.reset_default_graph()
 
         n_tags = len(corpus.tag_dict)
@@ -116,7 +120,8 @@ class NER:
         elif 'rnn' in net_type.lower():
             if cell_type is None or cell_type not in {'lstm', 'gru'}:
                 raise RuntimeError('You must specify the type of the cell! It could be either "lstm" or "gru"')
-            units = stacked_rnn(emb, n_filters, cell_type=cell_type)
+            with tf.variable_scope('RecurrentNet'):
+                units = stacked_rnn(emb, n_filters, cell_type=cell_type)
 
         elif 'cnn_highway' in net_type.lower():
                 units = highway_convolutional_network(emb,
@@ -137,6 +142,14 @@ class NER:
                                                                                    y_true,
                                                                                    sequence_lengths)
             loss_tensor = -log_likelihood
+            print(loss_tensor)
+            if use_focal_loss:
+                gamma = 5
+                probs = tf.nn.softmax(logits)
+                ground_truth_labels = tf.one_hot(y_true, n_tags)
+                ground_truth_prob = tf.reduce_sum(ground_truth_labels * probs, axis=2)
+                print(ground_truth_prob)
+                loss_tensor *= (1 - ground_truth_prob) ** gamma
             predictions = None
         else:
             ground_truth_labels = tf.one_hot(y_true, n_tags)
@@ -147,11 +160,10 @@ class NER:
         loss = tf.reduce_mean(loss_tensor)
 
         # Initialize session
-        sess = tf.Session()
-        if verbouse:
-            self.print_number_of_parameters()
-        if logging:
-            self.train_writer = tf.summary.FileWriter('summary', sess.graph)
+        config = tf.ConfigProto()
+        config.gpu_options.visible_device_list = str(gpu)
+
+        sess = tf.Session(config=config)
 
         self._use_crf = use_crf
         self.summary = tf.summary.merge_all()
@@ -171,6 +183,7 @@ class NER:
         self._dropout = dropout_ph
 
         self._loss = loss
+
         self._sess = sess
         self.corpus = corpus
 
@@ -183,7 +196,7 @@ class NER:
         # Get training op
         self._train_op = self.get_train_op(loss, learning_rate_ph, lr_decay_rate=learning_rate_decay_ph)
         self._embeddings_onethego = embeddings_onethego
-        self.verbouse = verbouse
+        self.verbose = verbouse
         sess.run(tf.global_variables_initializer())
         self._mask = mask
         if use_capitalization:
@@ -193,16 +206,17 @@ class NER:
         if pretrained_model_filepath is not None:
             self.load(pretrained_model_filepath)
 
-    def save(self, model_file_path=None):
+    def save(self, model_file_path=None, add_recurrent_layer_prefix=False):
+        var_dict = {(['', 'RecurrentNet/'][var.name.startswith('RNN')] + var.name[:-2]): var for var in tf.trainable_variables()}
         if model_file_path is None:
             if not os.path.exists(MODEL_PATH):
                 os.mkdir(MODEL_PATH)
             model_file_path = os.path.join(MODEL_PATH, MODEL_FILE_NAME)
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(var_dict)
         saver.save(self._sess, model_file_path)
 
     def load(self, model_file_path):
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(tf.trainable_variables())
         saver.restore(self._sess, model_file_path)
 
     def train_on_batch(self, x_word, x_char, y_tag):
@@ -224,29 +238,41 @@ class NER:
         total_num_parameters = np.sum(list(blocks.values()))
         print('Total number of parameters equal {}'.format(total_num_parameters))
 
-    def fit(self, batch_gen=None, batch_size=32, learning_rate=1e-3, epochs=1, dropout_rate=0.5, learning_rate_decay=1):
-        for epoch in range(epochs):
-            if self.verbouse:
-                print('Epoch {}'.format(epoch))
-            if batch_gen is None:
-                batch_generator = self.corpus.batch_generator(batch_size, dataset_type='train')
-            for x, y in batch_generator:
-                feed_dict = self._fill_feed_dict(x,
-                                                 y,
-                                                 learning_rate,
-                                                 dropout_rate=dropout_rate,
-                                                 training=True,
-                                                 learning_rate_decay=learning_rate_decay)
-                if self._logging:
-                    summary, _ = self._sess.run([self.summary, self._train_op], feed_dict=feed_dict)
-                    self.train_writer.add_summary(summary)
+    def fit(self,
+            batch_gen=None,
+            batch_size=32,
+            learning_rate=1e-3,
+            epochs=1,
+            dropout_rate=0.5,
+            learning_rate_decay=1,
+            save_path=None):
+        best_score = 0
+        try:
+            for epoch in range(epochs):
+                if self.verbose:
+                    print('Epoch {}'.format(epoch))
+                if batch_gen is None:
+                    batch_generator = self.corpus.batch_generator(batch_size, dataset_type='train')
+                for x, y in batch_generator:
+                    feed_dict = self._fill_feed_dict(x,
+                                                     y,
+                                                     learning_rate,
+                                                     dropout_rate=dropout_rate,
+                                                     training=True,
+                                                     learning_rate_decay=learning_rate_decay)
+                    if self._logging:
+                        summary, _ = self._sess.run([self.summary, self._train_op], feed_dict=feed_dict)
+                        self.train_writer.add_summary(summary)
 
-                self._sess.run(self._train_op, feed_dict=feed_dict)
-            if self.verbouse:
-                self.eval_conll('valid', print_results=True)
-            self.save()
+                    self._sess.run(self._train_op, feed_dict=feed_dict)
+                scores = self.eval_conll('valid', print_results=True, short_report=False)
+                if best_score < scores['__total__']['f1'] and save_path is not None:
+                    print('Model saved')
+                    self.save(save_path)
+        except KeyboardInterrupt:
+            self.eval_conll('test', print_results=True, short_report=False)
 
-        if self.verbouse:
+        if self.verbose:
             self.eval_conll(dataset_type='train', short_report=False)
             self.eval_conll(dataset_type='valid', short_report=False)
             results = self.eval_conll(dataset_type='test', short_report=False)
@@ -277,6 +303,9 @@ class NER:
         y_true_list = list()
         y_pred_list = list()
         print('Eval on {}:'.format(dataset_type))
+        import time
+        start_time = time.time()
+
         for x, y_gt in self.corpus.batch_generator(batch_size=32, dataset_type=dataset_type):
             y_pred = self.predict(x)
             y_gt = self.corpus.tag_dict.batch_idxs2batch_toks(y_gt, filter_paddings=True)
@@ -286,6 +315,8 @@ class NER:
                     y_pred_list.append(tag_predicted)
                 y_true_list.append('O')
                 y_pred_list.append('O')
+        self.eval_conll_script(y_true_list, y_pred_list)
+        print("--- %s seconds ---" % (time.time() - start_time))
         return precision_recall_f1(y_true_list,
                                    y_pred_list,
                                    print_results,
@@ -383,6 +414,24 @@ class NER:
         for n, predicted_tags in enumerate(predictions_batch):
             predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
         return predictions_batch_no_pad
+
+    def eval_conll_script(self,
+                          y_true_list,
+                          y_pred_list,
+                          output_filepath='output.txt',
+                          report_file_path='conll_evaluation.txt',
+                          dataset_type='test'):
+        with open(output_filepath, 'w') as f:
+            for tag_predicted, tag_ground_truth in zip(y_pred_list, y_true_list):
+                f.write(' '.join(['word'] + ['pur'] * 4 + [tag_ground_truth] + [tag_predicted]) + '\n')
+
+        conll_evaluation_script = os.path.join('.', 'conlleval')
+        shell_command = 'perl {0} < {1} > {2}'.format(conll_evaluation_script, output_filepath, report_file_path)
+        os.system(shell_command)
+        print(dataset_type.capitalize() + ' set')
+        with open(report_file_path) as f:
+            for line in f:
+                print(line)
 
 
 if __name__ == '__main__':

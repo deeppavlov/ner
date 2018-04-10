@@ -15,6 +15,7 @@ from collections import Counter
 from collections import defaultdict
 import random
 import numpy as np
+from itertools import chain
 
 
 
@@ -125,9 +126,9 @@ class Corpus:
 
     # All tokens for dictionary building
     def get_tokens(self, data_type='train'):
-        for tokens, _ in self.dataset[data_type]:
-            for token in tokens:
-                yield token
+        x, _ = zip(*self.dataset[data_type])
+        for token in set(chain(*x)):
+            yield token
 
     # All tags for dictionary building
     def get_tags(self, data_type=None):
@@ -136,16 +137,15 @@ class Corpus:
         else:
             data_types = [data_type]
         for data_type in data_types:
-            for _, tags in self.dataset[data_type]:
-                for tag in tags:
-                    yield tag
+            _, y = zip(*self.dataset[data_type])
+            for tag in set(chain(*y)):
+                yield tag
 
     # All characters for dictionary building
     def get_characters(self, data_type='train'):
-        for tokens, _ in self.dataset[data_type]:
-            for token in tokens:
-                for character in token:
-                    yield character
+        for token in self.get_tokens(data_type):
+            for character in token:
+                yield character
 
     def load_embeddings(self, file_path):
         # Embeddins must be in fastText format either bin or
