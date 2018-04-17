@@ -6,7 +6,7 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express ывсокийor implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
@@ -127,9 +127,13 @@ class NER:
         else:
             raise KeyError('There is no such type of network: {}'.format(net_type))
 
+        # Save the whales
+        self._units = units
+
         # Classifier
         with tf.variable_scope('Classifier'):
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
+        self._probs = tf.nn.softmax(logits, axis=-1)
 
         if use_crf:
             sequence_lengths = tf.reduce_sum(mask, axis=1)
@@ -383,6 +387,12 @@ class NER:
         for n, predicted_tags in enumerate(predictions_batch):
             predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
         return predictions_batch_no_pad
+
+    def get_hiddens_and_probs(self, tokens_batch):
+        batch_x, _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
+        feed_dict = self._fill_feed_dict(batch_x, training=False)
+        probs, hidden_states = self._sess.run([self._probs, self._units], feed_dict)
+        return hidden_states, probs
 
 
 if __name__ == '__main__':
