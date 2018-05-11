@@ -28,20 +28,20 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # Check existence of the model by hashsum
 
-if md5_hashsum(sorted(glob('model/*'))) != 'fd50a27b96b24cdabdda13795a3baae7':
-    # Download and extract model
-    download_url = 'http://lnsigo.mipt.ru/export/models/ner/ner_model_total_rus.tar.gz'
-    download_path = 'model/'
-    download_untar(download_url, download_path)
+
+# Download and extract model
+download_url = 'http://lnsigo.mipt.ru/export/models/ner/template_ner.tar.gz'
+download_path = 'model/'
+download_untar(download_url, download_path)
 
 # Load network params
 with open('model/params.json') as f:
     network_params = json.load(f)
 
 
-corpus = Corpus(dicts_filepath='model/dict.txt')
+corpus = Corpus(dicts_filepath='model/dicts.txt')
 
-network = NER(corpus, verbouse=False, pretrained_model_filepath='model/ner_model', **network_params)
+network = NER(corpus, verbouse=False, pretrained_model_filepath='model/ner_model.ckpt', **network_params)
 
 
 def print_predict(sentence):
