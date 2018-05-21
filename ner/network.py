@@ -10,21 +10,18 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express ывсокийor im
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-
 import os
 from collections import defaultdict
 import numpy as np
 import tensorflow as tf
-from .layers import character_embedding_network
-from .layers import embedding_layer
-from .layers import stacked_convolutions
-from .layers import highway_convolutional_network
-from .layers import stacked_rnn
+from ner.layers import character_embedding_network
+from ner.layers import embedding_layer
+from ner.layers import stacked_convolutions
+from ner.layers import highway_convolutional_network
+from ner.layers import stacked_rnn
 from tensorflow.contrib.layers import xavier_initializer
 
-
-from .corpus import Corpus
-from .evaluation import precision_recall_f1
+from ner.evaluation import precision_recall_f1
 
 
 SEED = 42
@@ -133,7 +130,7 @@ class NER:
         # Classifier
         with tf.variable_scope('Classifier'):
             logits = tf.layers.dense(units, n_tags, kernel_initializer=xavier_initializer())
-        self._probs = tf.nn.softmax(logits, axis=-1)
+        self._probs = tf.nn.softmax(logits, dim=-1)
 
         if use_crf:
             sequence_lengths = tf.reduce_sum(mask, axis=1)
@@ -388,36 +385,77 @@ class NER:
             predictions_batch_no_pad.append(predicted_tags[: len(tokens_batch[n])])
         return predictions_batch_no_pad
 
-    def get_hiddens_and_probs(self, tokens_batch):
+    def get_hiddens_and_probs(self, tokens_batch, tag='ORG'):
+        tag_idxs = [n for n, t in enumerate(self.corpus.tag_dict._i2t) if t.endswith(tag)]
         batch_x, _ = self.corpus.tokens_batch_to_numpy_batch(tokens_batch)
         feed_dict = self._fill_feed_dict(batch_x, training=False)
         probs, hidden_states = self._sess.run([self._probs, self._units], feed_dict)
-        return hidden_states, probs
+        tag_probs = np.zeros_like(probs[:, :, 0])
+        for tag_idx in tag_idxs:
+            tag_probs += probs[:, :, tag_idx]
+        return hidden_states, tag_probs
 
 
 if __name__ == '__main__':
-    corp = Corpus(dicts_filepath='dict.txt')
+    from ner.utils import download_untar
 
-    parameters = {'n_conv_layers': 2,
-                  'n_filters': 100,
-                  'filter_width': 5,
-                  'token_embeddings_dim': 100,
-                  'char_embeddings_dim': 25,
-                  'use_batch_norm': False,
-                  'use_crf': True}
 
-    # Creating a convolutional NER model
-    ner = NER(corp, **parameters)
+    conll_tar_url = 'http://lnsigo.mipt.ru/export/datasets/conll2003.tar.gz'
+    download_path = 'conll2003/'
+    download_untar(conll_tar_url, download_path)
 
-    # Training the model
-    ner.fit(epochs=10,
-            batch_size=8,
-            learning_rate=1e-2,
-            dropout_rate=0.5)
+    data_types = ['train', 'test', 'valid']
+    dataset_dict = dict()
+    for data_type in data_types:
 
-    # Creating new predict_for_token_batch model and restoring pre-trained weights
-    path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
-    model_path = os.path.join(path, MODEL_PATH, MODEL_FILE_NAME)
-    ner_ = NER(corp, pretrained_model_filepath=model_path, **parameters)
-    # Evaluate loaded model
-    print('Success')
+        with open('conll2003/' + data_type + '.txt') as f:
+            xy_list = list()
+            tokens = list()
+            tags = list()
+            for line in f:
+                items = line.split()
+                if len(items) > 1 and '-DOCSTART-' not in items[0]:
+                    token, tag = items
+                    if token[0].isdigit():
+                        tokens.append('#')
+                    else:
+                        tokens.append(token)
+                    tags.append(tag)
+                elif len(tokens) > 0:
+                    xy_list.append((tokens, tags,))
+                    tokens = list()
+                    tags = list()
+            dataset_dict[data_type] = xy_list
+
+    for key in dataset_dict:
+        print('Number of samples (sentences) in {:<5}: {}'.format(key, len(dataset_dict[key])))
+
+    print('\nHere is a first two samples from the train part of the dataset:')
+    first_two_train_samples = dataset_dict['train'][:2]
+    for n, sample in enumerate(first_two_train_samples):
+        # sample is a tuple of sentence_tokens and sentence_tags
+        tokens, tags = sample
+        print('Sentence {}'.format(n))
+        print('Tokens: {}'.format(tokens))
+        print('Tags:   {}'.format(tags))
+
+
+    from ner.corpus import Corpus
+    corp = Corpus(dataset_dict, embeddings_file_path=None)
+    from ner.network import NER
+
+    model_params = {"filter_width": 7,
+                    "embeddings_dropout": True,
+                    "n_filters": [
+                        128, 128,
+                    ],
+                    "token_embeddings_dim": 100,
+                    "char_embeddings_dim": 25,
+                    "use_batch_norm": True,
+                    "use_crf": True,
+                    "net_type": 'cnn',
+                    "use_capitalization": True,
+                   }
+
+    net = NER(corp, **model_params)
+    net.get_hiddens_and_probs([['this', 'is', 'my', 'sample']])
