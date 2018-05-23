@@ -200,6 +200,8 @@ class Corpus:
         # Determine dimensions
         batch_size = len(batch_x)
         max_utt_len = max([len(utt) for utt in batch_x])
+        # Fix batch with len 1 issue (https://github.com/deepmipt/ner/issues/4) 
+        max_utt_len = max(max_utt_len, 2)
         max_token_len = max([len(token) for utt in batch_x for token in utt])
 
         # Check whether bin file is used (if so then embeddings will be prepared on the go using gensim)
@@ -214,7 +216,9 @@ class Corpus:
         # Capitalization
         x['capitalization'] = np.zeros([batch_size, max_utt_len], dtype=np.float32)
         for n, utt in enumerate(batch_x):
-            x['capitalization'][n, :len(utt)] = [tok[0].isupper() for tok in utt]
+            for k, tok in enumerate(utt):
+                if len(tok) > 0 and tok[0].isupper():
+                    x['capitalization'][n, k] = 1
 
         # Prepare x batch
         for n, utterance in enumerate(batch_x):
@@ -250,7 +254,7 @@ class Corpus:
     def save_corpus_dicts(self, filename='dict.txt'):
         # Token dict
         token_dict = self.token_dict._i2t
-        with open(filename, 'w') as f:
+        with open(filename, 'w', encoding="utf8") as f:
             f.write('-TOKEN-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
@@ -258,7 +262,7 @@ class Corpus:
 
         # Tag dict
         token_dict = self.tag_dict._i2t
-        with open(filename, 'a') as f:
+        with open(filename, 'a', encoding="utf8") as f:
             f.write('-TAG-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
@@ -266,20 +270,20 @@ class Corpus:
 
         # Character dict
         token_dict = self.char_dict._i2t
-        with open(filename, 'a') as f:
+        with open(filename, 'a', encoding="utf8") as f:
             f.write('-CHAR-DICT-\n')
             for ind in range(len(token_dict)):
                 f.write(token_dict[ind] + '\n')
             f.write('\n')
 
     def load_corpus_dicts(self, filename='dict.txt'):
-        with open(filename) as f:
+        with open(filename, encoding="utf8") as f:
             # Token dict
             tokens = list()
             line = f.readline()
             assert line.strip() == '-TOKEN-DICT-'
             while len(line) > 0:
-                line = f.readline().strip()
+                line = f.readline()[:-1]
                 if len(line) > 0:
                     tokens.append(line)
             self.token_dict = Vocabulary(tokens)
@@ -287,9 +291,10 @@ class Corpus:
             # Tag dictappend
             line = f.readline()
             tags = list()
+            print()
             assert line.strip() == '-TAG-DICT-'
             while len(line) > 0:
-                line = f.readline().strip()
+                line = f.readline()[:-1]
                 if len(line) > 0:
                     tags.append(line)
             self.tag_dict = Vocabulary(tags, is_tags=True)
@@ -299,7 +304,7 @@ class Corpus:
             chars = list()
             assert line.strip() == '-CHAR-DICT-'
             while len(line) > 0:
-                line = f.readline().strip()
+                line = f.readline()[:-1]
                 if len(line) > 0:
                     chars.append(line)
             self.char_dict = Vocabulary(chars)
